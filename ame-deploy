@@ -1,0 +1,190 @@
+#!/bin/sh
+# ame-deploy v0.4
+SELF="$(readlink -f "$0")"
+DEPLOY_DIR="$(dirname "$SELF")"
+
+for _f in "$DEPLOY_DIR"/lib/*.sh; do
+    [ -f "$_f" ] && . "$_f"
+done
+
+# フォールバック
+command -v log_info >/dev/null 2>&1 || log_info() { echo "[INFO] $*"; }
+command -v log_ok   >/dev/null 2>&1 || log_ok()   { echo "[ OK ] $*"; }
+command -v log_warn >/dev/null 2>&1 || log_warn() { echo "[WARN] $*" >&2; }
+command -v log_err  >/dev/null 2>&1 || log_err()  { echo "[ERR ] $*" >&2; }
+command -v pause    >/dev/null 2>&1 || pause()    { printf "\n  Enter > "; read _; }
+
+DEV=""; P1=""; P2=""; TARGET=""; ESP=""
+
+banner() {
+    clear
+    cat << 'BEOF'
++------------------------------------------------------+
+|   Ame Linux Installer (ame-deploy) v0.4              |
+|   robust / rescue-capable / Hyprland-ready           |
++------------------------------------------------------+
+|   [1] Detect hardware                                |
+|   [2] Select disk + partition                        |
+|   [3] Copy rootfs                                    |
+|   [4] Install firmware / drivers                     |
+|   [5] Select desktop environment                     |
+|   [6] Create user                                    |
+|   [7] Install bootloader                             |
+|   [8] Verify install                                 |
+|                                                      |
+|   [R] Rescue (fix broken install)                    |
+|   [A] Full auto (1-8)                                |
+|   [S] Shell    [X] Reboot  [P] Poweroff  [Q] Quit    |
++------------------------------------------------------+
+BEOF
+}
+
+step1() { show_hw_summary; pause; }
+
+step2() {
+    select_disk   || return
+    umount_disk
+    partition_disk    || { log_err "partition failed"; pause; return; }
+    format_partitions || { log_err "format failed"; pause; return; }
+    mount_target      || { log_err "mount failed"; pause; return; }
+    log_ok "ready: $DEV ($P1, $P2)"
+    pause
+}
+
+step3() {
+    require_disk || { pause; return; }
+    copy_rootfs
+    setup_target_skeleton
+    write_fstab
+    log_ok "rootfs copied"
+    pause
+}
+
+step4() {
+    require_disk || { pause; return; }
+    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    pause
+}
+
+step5() {
+    require_disk || { pause; return; }
+    echo
+    echo "  Profile:"
+    echo "    [0] minimal (CUI only)"
+    echo "    [1] River"
+    echo "    [2] KDE Plasma"
+    echo "    [3] GNOME"
+    echo "    [4] Hyprland (edge, full setup)"
+    echo "    [5] Sway"
+    printf "  Select > "; read d
+
+    profile=""
+    case "$d" in
+        0) profile="00-minimal" ;;
+        1) profile="01-river" ;;
+        2) profile="02-kde" ;;
+        3) profile="03-gnome" ;;
+        4) profile="04-hyprland" ;;
+        5) profile="05-sway" ;;
+        *) log_err "invalid"; pause; return ;;
+    esac
+
+    lock="auto"
+    if [ "$profile" != "00-minimal" ] && [ "$profile" != "04-hyprland" ]; then
+        echo
+        echo "  Lock screen:"
+        echo "    [0] none (TTY autostart)"
+        echo "    [1] sddm"
+        echo "    [2] gdm"
+        echo "    [3] greetd"
+        echo "    [a] auto"
+        printf "  Select > "; read l
+        case "$l" in
+            0) lock="none" ;;
+            1) lock="sddm" ;;
+            2) lock="gdm" ;;
+            3) lock="greetd" ;;
+            *) lock="auto" ;;
+        esac
+    fi
+
+    install_de_profile "$profile" "$lock"
+    pause
+}
+
+step6() { require_disk || { pause; return; }; create_user; pause; }
+
+step7() {
+    require_disk || { pause; return; }
+    install_bootloader_complete "$DEPLOY_DIR/boot" || { log_err "bootloader failed"; pause; return; }
+    cleanup_deploy
+    sync
+    log_ok "bootloader installed"
+    pause
+}
+
+step8() { require_disk || { pause; return; }; verify_target; pause; }
+
+rescue() { rescue_installed_system; pause; }
+
+step_all() {
+    printf "  Full auto? [y/N] > "; read c
+    [ "$c" = "y" ] || return
+    show_hw_summary
+    select_disk       || return
+    umount_disk
+    partition_disk    || return
+    format_partitions || return
+    mount_target      || return
+    copy_rootfs
+    setup_target_skeleton
+    write_fstab
+    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    install_de_profile 00-minimal none
+    create_user
+    install_bootloader_complete "$DEPLOY_DIR/boot" || return
+    cleanup_deploy
+    sync
+    verify_target
+    umount "$ESP"    2>/dev/null || true
+    umount "$TARGET" 2>/dev/null || true
+    printf "  Reboot now? [y/N] > "; read r
+    [ "$r" = "y" ] && reboot
+}
+
+require_root
+
+# 依存セルフチェック
+if [ -f "$DEPLOY_DIR/requirements.txt" ]; then
+    _pkgs=$(grep -v '^#' "$DEPLOY_DIR/requirements.txt" | grep -v '^$' | tr '\n' ' ')
+    _miss=""
+    for p in $_pkgs; do
+        apk info -e "$p" >/dev/null 2>&1 || _miss="$_miss $p"
+    done
+    if [ -n "$_miss" ]; then
+        log_info "installing deps:$_miss"
+        apk update >/dev/null 2>&1 || true
+        apk add --no-cache $_miss 2>&1 | tail -3 || true
+    fi
+fi
+
+while true; do
+    banner
+    printf "  Select > "; read c
+    case "$c" in
+        1) step1 ;;
+        2) step2 ;;
+        3) step3 ;;
+        4) step4 ;;
+        5) step5 ;;
+        6) step6 ;;
+        7) step7 ;;
+        8) step8 ;;
+        R|r) rescue ;;
+        A|a) step_all ;;
+        S|s) /bin/sh ;;
+        X|x) reboot ;;
+        P|p) poweroff ;;
+        Q|q) exit 0 ;;
+    esac
+done
