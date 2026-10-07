@@ -63,8 +63,27 @@ REPOEOF
     log_info "[4/4] generating initramfs"
     for v in $(ls "$TARGET/lib/modules"); do
         img="initramfs-${v##*-}"
-        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkinitfs -o /boot/$img $v 2>&1 | tail -2" || true
+        case "$v" in
+            *-lts)  img="initramfs-lts" ;;
+            *-edge) img="initramfs-edge" ;;
+            *-virt) img="initramfs-virt" ;;
+        esac
+        if [ -f "$TARGET/boot/$img" ]; then
+            log_ok "  $img already exists"
+        else
+            log_info "  generating $img for $v"
+            chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkinitfs -o /boot/$img $v 2>&1 | tail -3" || true
+            [ -f "$TARGET/boot/$img" ] && log_ok "  $img OK" || log_warn "  $img failed"
+        fi
     done
+
+    # 最終確認
+    if ! ls "$TARGET/boot/initramfs-"* >/dev/null 2>&1; then
+        log_err "no initramfs generated"
+        echo "  Check: chroot $TARGET apk add mkinitfs"
+        echo "         chroot $TARGET mkinitfs -o /boot/initramfs-lts $KVER"
+        return 1
+    fi
 
     ls -la "$TARGET/boot/" 2>/dev/null | grep -E 'vmlinuz|initramfs' || true
 
