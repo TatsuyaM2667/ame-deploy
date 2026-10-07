@@ -66,8 +66,10 @@ serial: yes
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init
 L2
-        log_warn "limine.conf (direct)"
+        log_warn "limine.conf (direct, root=$RD)"
     fi
+    echo "==== limine.conf ===="
+    cat "$ESP/EFI/BOOT/limine.conf"
 }
 register_uefi() {
     if command -v efibootmgr >/dev/null 2>&1; then

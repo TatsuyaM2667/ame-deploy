@@ -9,13 +9,13 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v2.0.3            |
-|   River default / 4-DE reliable / rescue              |
+|   Ame Linux Installer (ame-deploy) v3.0.0            |
+|   Kernel verified / WiFi auto / Sway primary          |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
-|   [4] Install kernel                                 |
+|   [4] Install kernel (verified modules)              |
 |   [5] Install firmware / drivers                     |
 |   [6] Select desktop environment                     |
 |   [7] Create user                                    |
@@ -23,7 +23,7 @@ banner() {
 |   [9] Verify install                                 |
 |                                                      |
 |   [A] FULL AUTO (1-9)                                |
-|   [R] Rescue (fix broken install)                    |
+|   [R] Rescue (fix everything)                        |
 |   [C] Show progress                                  |
 |   [S] Shell    [X] Reboot  [P] Poweroff  [Q] Quit    |
 +------------------------------------------------------+
@@ -60,21 +60,21 @@ step6() {
         select_and_install_kernel || { pause; return; }
     fi
     echo "  Profile:"
-    echo "    [1] River          (default)"
-    echo "    [2] KDE Plasma"
-    echo "    [3] GNOME"
-    echo "    [4] Hyprland       (best-effort)"
-    echo "    [5] Sway"
+    echo "    [1] Sway           (default, reliable)"
+    echo "    [2] River          (river-classic if available)"
+    echo "    [3] KDE Plasma"
+    echo "    [4] GNOME"
+    echo "    [5] Hyprland       (best-effort)"
     echo "    [0] minimal"
     printf "  Select [1]: "; read d
     [ -z "$d" ] && d="1"
     case "$d" in
         0) profile="00-minimal" ;;
-        1) profile="01-river" ;;
-        2) profile="02-kde" ;;
-        3) profile="03-gnome" ;;
-        4) profile="04-hyprland" ;;
-        5) profile="05-sway" ;;
+        1) profile="05-sway" ;;
+        2) profile="01-river" ;;
+        3) profile="02-kde" ;;
+        4) profile="03-gnome" ;;
+        5) profile="04-hyprland" ;;
         *) log_err "invalid"; pause; return ;;
     esac
     install_de_profile "$profile"
@@ -95,7 +95,7 @@ step_rescue() { rescue_installed_system; pause; }
 step_progress() { auto_mount_target 2>/dev/null || true; echo "=== State ==="; state_list; pause; }
 
 step_all() {
-    printf "  FULL AUTO (River default)? [y/N] > "; read c
+    printf "  FULL AUTO (Sway default)? [y/N] > "; read c
     [ "$c" = "y" ] || return
     show_hw_summary
     state_init
@@ -111,7 +111,7 @@ step_all() {
     fi
     state_done "kernel" || { echo "1" | { read _; select_and_install_kernel; }; }
     state_done "firmware" || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    state_done "de-river" || install_de_profile "01-river"
+    state_done "de-sway" || install_de_profile "05-sway"
     state_done "user" || create_user
     state_done "bootloader" || install_bootloader_complete "$DEPLOY_DIR/boot"
     cleanup_deploy
