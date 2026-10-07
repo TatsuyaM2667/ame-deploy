@@ -228,3 +228,113 @@ AUTO
     chmod +x "$TARGET/etc/profile.d/ame-autostart.sh"
     log_ok "autostart installed (river/sway/hyprland)"
 }
+
+# ============ v2.0.4 override: install_river_complete ============
+install_river_complete() {
+    if state_done "de-river"; then
+        log_info "River already installed"; return 0
+    fi
+    log_info "=== River install v2.0.4 (auto-detect) ==="
+    enable_edge
+    install_common
+
+    # 利用可能な river 関連パッケージを確認
+    AVAIL=$(chroot "$TARGET" /bin/sh -c 'apk search -x river 2>/dev/null' 2>/dev/null || true)
+    AVAIL=$(chroot "$TARGET" /bin/sh -c 'apk search river 2>/dev/null | head -20' 2>/dev/null || true)
+    log_info "available river packages:"
+    echo "$AVAIL" | while read -r line; do [ -n "$line" ] && log_info "  $line"; done
+
+    # 1) river-classic があれば優先
+    if echo "$AVAIL" | grep -q '^river-classic'; then
+        log_info "[1/3] installing river-classic"
+        chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories river-classic 2>&1 | tail -3' || true
+        pkgs_optional "river-tools" riverctl rivertile waybar foot fuzzel mako swaybg xdg-desktop-portal-wlr xdg-utils
+
+        if chroot "$TARGET" /bin/sh -c 'command -v river >/dev/null 2>&1'; then
+            _river_write_classic_configs
+            setup_autostart_river
+            state_mark "de-river"
+            log_ok "River-classic complete (riverctl compatible)"
+            return 0
+        fi
+    fi
+
+    # 2) river (0.4.x) の場合は Sway へ fallback
+    log_warn "[2/3] river-classic not available, river 0.4.x is not usable here"
+    log_warn "      switching to Sway (same wayland tiling WM)"
+    install_sway_complete
+    state_mark "de-river"
+    log_ok "Sway installed (River fallback)"
+    return 0
+}
+
+# river-classic 用の config を全ユーザーに配置
+_river_write_classic_configs() {
+    log_info "writing river-classic configs to all users"
+    _write_river_config_to() {
+        u="$1"
+        h="$2"
+        [ -z "$u" ] && return
+        [ -z "$h" ] && h="/home/$u"
+        [ "$u" = "root" ] && h="/root"
+        mkdir -p "$TARGET$h/.config/river"
+        cat > "$TARGET$h/.config/river/init" << 'RC'
+#!/bin/sh
+export XDG_CURRENT_DESKTOP=river
+export XDG_SESSION_TYPE=wayland
+swaybg -c "#1a1a2e" 2>/dev/null &
+waybar 2>/dev/null &
+mako 2>/dev/null &
+rivertile -view-padding 6 -outer-padding 6 2>/dev/null &
+riverctl map normal Super Return spawn foot
+riverctl map normal Super Q close
+riverctl map normal Super D spawn fuzzel
+riverctl map normal Super+Shift E exit
+riverctl map normal Super J focus-view next
+riverctl map normal Super K focus-view previous
+riverctl map normal Super+Shift J swap next
+riverctl map normal Super+Shift K swap previous
+riverctl map normal Super Space toggle-float
+riverctl map normal Super F toggle-fullscreen
+riverctl modifier Super
+RC
+        chmod +x "$TARGET$h/.config/river/init"
+        uid=$(chroot "$TARGET" /bin/sh -c "id -u $u 2>/dev/null" || echo 1000)
+        gid=$(chroot "$TARGET" /bin/sh -c "id -g $u 2>/dev/null" || echo 1000)
+        chroot "$TARGET" /bin/sh -c "chown -R $uid:$gid $h/.config 2>/dev/null" || true
+        log_ok "  config -> $h/.config/river/init"
+    }
+    if [ -f "$TARGET/etc/passwd" ]; then
+        awk -F: '$3 >= 1000 && $3 < 60000 {print $1"|"$6}' "$TARGET/etc/passwd" > /tmp/ame-u.txt
+        while IFS='|' read -r u h; do _write_river_config_to "$u" "$h"; done < /tmp/ame-u.txt
+        rm -f /tmp/ame-u.txt
+    fi
+    _write_river_config_to "root" "/root"
+}
+
+setup_autostart_river() {
+    cat > "$TARGET/etc/profile.d/ame-autostart.sh" << 'AUTO'
+if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
+    UID_NUM="$(id -u)"
+    RDIR="/run/user/$UID_NUM"
+    i=0
+    while [ $i -lt 10 ]; do
+        [ -d "$RDIR" ] && break
+        sleep 1
+        i=$((i+1))
+    done
+    [ -d "$RDIR" ] || mkdir -p "$RDIR" 2>/dev/null
+    chmod 0700 "$RDIR" 2>/dev/null
+    export XDG_RUNTIME_DIR="$RDIR"
+    if command -v river >/dev/null 2>&1 && [ -x "$HOME/.config/river/init" ]; then
+        exec river
+    elif command -v sway >/dev/null 2>&1; then
+        exec sway
+    elif command -v Hyprland >/dev/null 2>&1; then
+        exec Hyprland
+    fi
+fi
+AUTO
+    chmod +x "$TARGET/etc/profile.d/ame-autostart.sh"
+    log_ok "autostart installed"
+}
