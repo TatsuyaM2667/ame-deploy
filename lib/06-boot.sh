@@ -111,3 +111,51 @@ install_bootloader_complete() {
     state_mark "bootloader"
     return 0
 }
+
+# ============ v1.0.3 override: write_limine_conf ============
+write_limine_conf() {
+    local mnt_p2
+    mnt_p2=$(grep " /mnt/ame-target " /proc/mounts 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$mnt_p2" ] && [ -b "$mnt_p2" ]; then
+        P2="$mnt_p2"
+    fi
+    if [ -z "$P2" ] || [ ! -b "$P2" ]; then
+        for d in sda nvme0n1 vda; do
+            [ -b "/dev/${d}2" ]  && { P2="/dev/${d}2";  P1="/dev/${d}1";  DEV="/dev/$d"; break; }
+            [ -b "/dev/${d}p2" ] && { P2="/dev/${d}p2"; P1="/dev/${d}p1"; DEV="/dev/$d"; break; }
+        done
+    fi
+    [ -b "$P2" ] || { log_err "no block device (P2=$P2)"; return 1; }
+    local rp
+    rp=$(blkid -s PARTUUID -o value "$P2" 2>/dev/null)
+    [ -n "$rp" ] || { log_err "no PARTUUID for $P2"; return 1; }
+    log_info "root device: $P2"
+    log_info "root PARTUUID: $rp"
+    if [ -f "$ESP/EFI/BOOT/initramfs.cpio.gz" ]; then
+        cat > "$ESP/EFI/BOOT/limine.conf" << LEOF
+timeout: 5
+serial: yes
+
+/Ame Linux
+    protocol: linux
+    kernel_path: boot():/EFI/BOOT/vmlinuz-ame
+    module_path: boot():/EFI/BOOT/initramfs.cpio.gz
+    cmdline: console=tty0 loglevel=7 ignore_loglevel root=PARTUUID=$rp rootfstype=ext4 rw
+LEOF
+        log_ok "limine.conf written (initramfs, verbose)"
+    else
+        cat > "$ESP/EFI/BOOT/limine.conf" << LEOF
+timeout: 5
+serial: yes
+
+/Ame Linux
+    protocol: linux
+    kernel_path: boot():/EFI/BOOT/vmlinuz-ame
+    cmdline: console=tty0 loglevel=7 ignore_loglevel root=PARTUUID=$rp rootfstype=ext4 rw init=/sbin/init
+LEOF
+        log_warn "limine.conf (direct)"
+    fi
+    echo "==== limine.conf ===="
+    cat "$ESP/EFI/BOOT/limine.conf"
+    return 0
+}
