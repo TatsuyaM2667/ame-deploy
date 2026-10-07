@@ -102,3 +102,74 @@ auto_mount_target() {
     done
     return 1
 }
+
+# ============================================================
+# 共通ヘルパ（v1.0.1 で追加）
+# ============================================================
+
+# chroot 内 /proc /sys /dev をマウント
+_mount_chroot_fs() {
+    [ -n "$TARGET" ] || return 0
+    mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/dev/pts" "$TARGET/dev/shm"
+    mountpoint -q "$TARGET/proc" || mount -t proc     none "$TARGET/proc" 2>/dev/null || true
+    mountpoint -q "$TARGET/sys"  || mount -t sysfs    none "$TARGET/sys"  2>/dev/null || true
+    mountpoint -q "$TARGET/dev"  || mount -t devtmpfs none "$TARGET/dev"  2>/dev/null || true
+    mountpoint -q "$TARGET/dev/pts" || mount -t devpts none "$TARGET/dev/pts" 2>/dev/null || true
+}
+
+_umount_chroot_fs() {
+    [ -n "$TARGET" ] || return 0
+    umount "$TARGET/dev/pts" 2>/dev/null || true
+    umount "$TARGET/dev/shm" 2>/dev/null || true
+    umount "$TARGET/dev"     2>/dev/null || true
+    umount "$TARGET/sys"     2>/dev/null || true
+    umount "$TARGET/proc"    2>/dev/null || true
+}
+
+# initramfs 検証（サイズ + /init 存在）
+_verify_initramfs() {
+    local f="$1"
+    [ -f "$f" ] || return 1
+    local sz
+    sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    [ "$sz" -gt 500000 ] || return 1   # 500KB 以上
+
+    local tmp=/tmp/ame-irv-$$
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    ( cd "$tmp" && zcat "$f" 2>/dev/null | cpio -idm --quiet 2>/dev/null )
+    local rc=1
+    [ -e "$tmp/init" ] && rc=0
+    rm -rf "$tmp"
+    return $rc
+}
+
+# 内蔵ディスク自動マウント
+auto_mount_target() {
+    if mountpoint -q /mnt/ame-target 2>/dev/null; then
+        TARGET=/mnt/ame-target; ESP=/mnt/ame-esp
+        for d in sda nvme0n1 vda; do
+            if [ -b "/dev/${d}2" ]; then DEV="/dev/$d"; P1="/dev/${d}1"; P2="/dev/${d}2"; break; fi
+            if [ -b "/dev/${d}p2" ]; then DEV="/dev/$d"; P1="/dev/${d}p1"; P2="/dev/${d}p2"; break; fi
+        done
+        state_init; return 0
+    fi
+
+    mkdir -p /mnt/ame-target /mnt/ame-esp
+    for d in sda nvme0n1 vda; do
+        if [ -b "/dev/${d}2" ]; then
+            P2="/dev/${d}2"; P1="/dev/${d}1"; DEV="/dev/$d"
+        elif [ -b "/dev/${d}p2" ]; then
+            P2="/dev/${d}p2"; P1="/dev/${d}p1"; DEV="/dev/$d"
+        else
+            continue
+        fi
+        if mount "$P2" /mnt/ame-target 2>/dev/null; then
+            mount "$P1" /mnt/ame-esp 2>/dev/null || true
+            TARGET=/mnt/ame-target; ESP=/mnt/ame-esp
+            state_init
+            log_ok "auto-mounted: $P2 -> $TARGET"
+            return 0
+        fi
+    done
+    return 1
+}

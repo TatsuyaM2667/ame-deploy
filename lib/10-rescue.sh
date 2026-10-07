@@ -122,47 +122,62 @@ REPOEOF
 _generate_fallback_initramfs() {
     local img="$1" kver="$2"
     local tmp="$TARGET/tmp/fallback-ir"
-    rm -rf "$tmp"; mkdir -p "$tmp"/{bin,dev,proc,sys,newroot,lib/modules}
+    rm -rf "$tmp"
+    mkdir -p "$tmp"
+    mkdir -p "$tmp/bin"
+    mkdir -p "$tmp/dev"
+    mkdir -p "$tmp/proc"
+    mkdir -p "$tmp/sys"
+    mkdir -p "$tmp/newroot"
+    mkdir -p "$tmp/lib"
+    mkdir -p "$tmp/lib/modules"
 
-    # busybox を探す（static 優先）
+    # busybox を探す（target優先、無ければホストから）
     local bb=""
-    for cand in "$TARGET/bin/busybox.static" "$TARGET/bin/busybox"; do
-        [ -f "$cand" ] && { bb="$cand"; break; }
+    for cand in "$TARGET/bin/busybox" "$TARGET/usr/bin/busybox" /bin/busybox /usr/bin/busybox; do
+        if [ -f "$cand" ]; then bb="$cand"; break; fi
     done
-    [ -n "$bb" ] || { log_err "no busybox"; return 1; }
+    [ -n "$bb" ] || { log_err "no busybox found"; return 1; }
+    log_info "  using busybox: $bb"
 
-    cp "$bb" "$tmp/bin/busybox"
-    ln -sf busybox "$tmp/bin/sh"
+    cp "$bb" "$tmp/bin/busybox" || return 1
+    chmod +x "$tmp/bin/busybox"
+    ( cd "$tmp/bin" && ./busybox --install -s . 2>/dev/null ) || true
 
-    # init
+    # init スクリプト
     cat > "$tmp/init" << 'INITEOF'
-#!/bin/sh
-mount -t proc none /proc
-mount -t sysfs none /sys
-mount -t devtmpfs none /dev 2>/dev/null || mount -t tmpfs none /dev
+#!/bin/busybox sh
+/bin/busybox --install -s /bin 2>/dev/null
+mount -t proc     none /proc 2>/dev/null
+mount -t sysfs    none /sys  2>/dev/null
+mount -t devtmpfs none /dev  2>/dev/null || mount -t tmpfs none /dev
 mkdir -p /newroot
-ROOT=$(cat /proc/cmdline | tr ' ' '\n' | grep '^root=' | head -1 | cut -d= -f2-)
+ROOT=$(cat /proc/cmdline 2>/dev/null | tr ' ' '\n' | grep '^root=' | head -1 | cut -d= -f2-)
 [ -z "$ROOT" ] && ROOT=/dev/sda2
-echo "ame-initramfs: mounting $ROOT"
-for i in 1 2 3 4 5; do
+echo "ame-initramfs: root=$ROOT"
+i=0
+while [ $i -lt 10 ]; do
     mount -o rw "$ROOT" /newroot 2>/dev/null && break
     sleep 1
+    i=$((i+1))
 done
 if ! mountpoint -q /newroot; then
     echo "ame-initramfs: FAILED to mount $ROOT"
     exec /bin/sh
 fi
+echo "ame-initramfs: switch_root"
 exec switch_root /newroot /sbin/init
 INITEOF
     chmod +x "$tmp/init"
 
-    # cpio
-    ( cd "$tmp" && find . | cpio -o -H newc 2>/dev/null | gzip > "$TARGET/boot/$img" )
+    # cpio 化
+    ( cd "$tmp" && find . | cpio -o -H newc 2>/dev/null | gzip -9 > "$TARGET/boot/$img" )
     rm -rf "$tmp"
 
     if _verify_initramfs "$TARGET/boot/$img"; then
         log_ok "fallback initramfs created"
         return 0
     fi
+    log_err "fallback initramfs verify failed"
     return 1
 }
