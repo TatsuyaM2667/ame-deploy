@@ -14,12 +14,17 @@ command -v pause    >/dev/null 2>&1 || pause()    { printf "\n  Enter > "; read 
 
 DEV=""; P1=""; P2=""; TARGET=""; ESP=""
 
-# target が既にマウント済みか自動検出
 auto_detect_target() {
     if mountpoint -q /mnt/ame-target 2>/dev/null; then
         TARGET=/mnt/ame-target; ESP=/mnt/ame-esp
-        [ -b /dev/sda2 ] && P2=/dev/sda2 && P1=/dev/sda1 && DEV=/dev/sda
-        [ -b /dev/nvme0n1p2 ] && P2=/dev/nvme0n1p2 && P1=/dev/nvme0n1p1 && DEV=/dev/nvme0n1
+        for d in sda nvme0n1 vda; do
+            if [ -b "/dev/${d}2" ] || [ -b "/dev/${d}p2" ]; then
+                DEV="/dev/$d"
+                [ -b "/dev/${d}2" ]  && { P1="/dev/${d}1";  P2="/dev/${d}2";  }
+                [ -b "/dev/${d}p2" ] && { P1="/dev/${d}p1"; P2="/dev/${d}p2"; }
+                break
+            fi
+        done
         state_init
         return 0
     fi
@@ -30,22 +35,22 @@ banner() {
     clear
     cat << 'BEOF'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v0.7              |
-|   idempotent / auto-repair / resume-capable          |
+|   Ame Linux Installer (ame-deploy) v0.8              |
+|   River default / 4-DE reliable / idempotent         |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
 |   [4] Install kernel (linux-lts / edge)              |
 |   [5] Install firmware / drivers                     |
-|   [6] Select desktop environment (Hyprland)          |
+|   [6] Select desktop environment                     |
 |   [7] Create user                                    |
 |   [8] Install bootloader                             |
 |   [9] Verify install                                 |
 |                                                      |
-|   [R] Rescue (fix broken install)                    |
-|   [A] Full auto (1-9, idempotent)                    |
-|   [C] Show progress (state)                          |
+|   [R] Rescue                                         |
+|   [A] Full auto (1-9)                                |
+|   [C] Show progress                                  |
 |   [S] Shell    [X] Reboot  [P] Poweroff  [Q] Quit    |
 +------------------------------------------------------+
 BEOF
@@ -55,11 +60,7 @@ show_progress() {
     auto_detect_target 2>/dev/null || true
     echo
     echo "  === Progress state ==="
-    if [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ]; then
-        state_list
-    else
-        echo "  (no state - install not started)"
-    fi
+    if [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ]; then state_list; else echo "  (none)"; fi
     pause
 }
 
@@ -70,35 +71,21 @@ step2() {
     partition_disk    || { log_err "partition failed"; pause; return; }
     format_partitions || { log_err "format failed"; pause; return; }
     mount_target      || { log_err "mount failed"; pause; return; }
-    state_init
-    state_clear
+    state_init; state_clear; state_init
     log_ok "ready: $DEV ($P1, $P2)"
     pause
 }
 step3() {
     require_disk || { pause; return; }
     state_init
-    if state_done "rootfs"; then
-        log_info "rootfs already copied - skip"
-        pause; return
-    fi
+    state_done "rootfs" && { log_info "rootfs copied - skip"; pause; return; }
     copy_rootfs; setup_target_skeleton; write_fstab
     state_mark "rootfs"
     log_ok "rootfs copied"
     pause
 }
-step4() {
-    require_disk || { pause; return; }
-    state_init
-    select_and_install_kernel
-    pause
-}
-step5() {
-    require_disk || { pause; return; }
-    state_init
-    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    pause
-}
+step4() { require_disk || { pause; return; }; state_init; select_and_install_kernel; pause; }
+step5() { require_disk || { pause; return; }; state_init; install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"; pause; }
 step6() {
     require_disk || { pause; return; }
     state_init
@@ -110,14 +97,14 @@ step6() {
 
     echo
     echo "  Profile:"
-    echo "    [0] minimal (CUI only)"
-    echo "    [1] River"
+    echo "    [1] River          (default, wayland tiling)"
     echo "    [2] KDE Plasma"
     echo "    [3] GNOME"
-    echo "    [4] Hyprland (edge, auto-repair)"
+    echo "    [4] Hyprland       (edge, best-effort)"
     echo "    [5] Sway"
-    printf "  Select [4]: "; read d
-    [ -z "$d" ] && d="4"
+    echo "    [0] minimal (CUI only)"
+    printf "  Select [1]: "; read d
+    [ -z "$d" ] && d="1"
 
     case "$d" in
         0) profile="00-minimal" ;;
@@ -129,19 +116,10 @@ step6() {
         *) log_err "invalid"; pause; return ;;
     esac
 
-    lock="auto"
-    if [ "$profile" = "02-kde" ]; then lock="sddm"; fi
-    if [ "$profile" = "03-gnome" ]; then lock="gdm"; fi
-
-    install_de_profile "$profile" "$lock"
+    install_de_profile "$profile" "auto"
     pause
 }
-step7() {
-    require_disk || { pause; return; }
-    state_init
-    create_user
-    pause
-}
+step7() { require_disk || { pause; return; }; state_init; create_user; pause; }
 step8() {
     require_disk || { pause; return; }
     state_init
@@ -151,22 +129,16 @@ step8() {
     log_ok "bootloader installed"
     pause
 }
-step9() {
-    require_disk || { pause; return; }
-    state_init
-    verify_target
-    pause
-}
+step9() { require_disk || { pause; return; }; state_init; verify_target; pause; }
 step_rescue() { rescue_installed_system; pause; }
 
 step_all() {
-    printf "  Full auto (idempotent, resume-capable)? [y/N] > "; read c
+    printf "  Full auto (River default)? [y/N] > "; read c
     [ "$c" = "y" ] || return
 
     show_hw_summary
     state_init
 
-    # 各ステップを冪等に
     if ! state_done "rootfs"; then
         select_disk || return
         umount_disk
@@ -180,17 +152,16 @@ step_all() {
         state_mark "rootfs"
     fi
 
-    state_done "kernel" || { log_info "installing linux-lts (default)"; echo "1" | select_and_install_kernel; }
-    state_done "firmware" || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    state_done "hyprland" || install_de_profile "04-hyprland" none
-    state_done "user" || create_user
-    state_done "bootloader" || install_bootloader_complete "$DEPLOY_DIR/boot"
+    state_done "kernel"    || { log_info "installing linux-lts"; echo "1" | select_and_install_kernel; }
+    state_done "firmware"  || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    state_done "de-river"  || install_de_profile "01-river" auto
+    state_done "user"      || create_user
+    state_done "bootloader"|| install_bootloader_complete "$DEPLOY_DIR/boot"
 
     cleanup_deploy
     sync
     verify_target
-
-    umount "$ESP" 2>/dev/null || true
+    umount "$ESP"    2>/dev/null || true
     umount "$TARGET" 2>/dev/null || true
     printf "  Reboot now? [y/N] > "; read r
     [ "$r" = "y" ] && reboot
@@ -198,17 +169,13 @@ step_all() {
 
 require_root
 
-# 依存チェック
 if [ -f "$DEPLOY_DIR/requirements.txt" ]; then
     _pkgs=$(grep -v '^#' "$DEPLOY_DIR/requirements.txt" | grep -v '^$' | tr '\n' ' ')
     _miss=""
-    for p in $_pkgs; do
-        apk info -e "$p" >/dev/null 2>&1 || _miss="$_miss $p"
-    done
+    for p in $_pkgs; do apk info -e "$p" >/dev/null 2>&1 || _miss="$_miss $p"; done
     [ -n "$_miss" ] && { log_info "installing deps:$_miss"; apk update >/dev/null 2>&1 || true; apk add --no-cache $_miss >/dev/null 2>&1 || true; }
 fi
 
-# 自動マウント検出（Resume 用）
 auto_detect_target 2>/dev/null || true
 
 while true; do
