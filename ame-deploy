@@ -9,8 +9,8 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v4.0.0            |
-|   Kernel verified / WiFi auto / RedIWM ready         |
+|   Ame Linux Installer (ame-deploy) v6.0.0            |
+|   MARSWM / orilla / Niri added                       |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
@@ -60,15 +60,19 @@ step6() {
         select_and_install_kernel || { pause; return; }
     fi
     echo "  Profile:"
-    echo "    [1] Hyprland       (Wayland tiling, rich ricing)"
+    echo "    [1] Hyprland       (Wayland tiling)"
     echo "    [2] River          (river-classic)"
-    echo "    [3] Sway           (reliable, i3-compatible)"
+    echo "    [3] Sway           (i3-compatible)"
     echo "    [4] GNOME"
     echo "    [5] KDE Plasma"
-    echo "    [6] RedIWM         (Zig, lightweight)"
+    echo "    [6] RedIWM         (Zig)"
+    echo "    [7] Miracle-WM     (Rust/WASM)"
+    echo "    [8] MARSWM         (Rust, X11)"
+    echo "    [9] orilla         (Rust, River WM)"
+    echo "    [10] Niri          (Rust, scrollable tiling)"
     echo "    [0] minimal"
-    printf "  Select [1]: "; read d
-    [ -z "$d" ] && d="1"
+    printf "  Select [10]: "; read d
+    [ -z "$d" ] && d="10"
     case "$d" in
         0) profile="00-minimal" ;;
         1) profile="01-hyprland" ;;
@@ -77,6 +81,10 @@ step6() {
         4) profile="04-gnome" ;;
         5) profile="05-kde" ;;
         6) profile="06-rediwm" ;;
+        7) profile="07-miracle-wm" ;;
+        8) profile="08-marswm" ;;
+        9) profile="09-orilla" ;;
+        10) profile="10-niri" ;;
         *) log_err "invalid"; pause; return ;;
     esac
     install_de_profile "$profile"
@@ -97,7 +105,7 @@ step_rescue() { rescue_installed_system; pause; }
 step_progress() { auto_mount_target 2>/dev/null || true; echo "=== State ==="; state_list; pause; }
 
 step_all() {
-    printf "  FULL AUTO (Hyprland default)? [y/N] > "; read c
+    printf "  FULL AUTO (Niri default)? [y/N] > "; read c
     [ "$c" = "y" ] || return
     show_hw_summary
     state_init
@@ -113,7 +121,7 @@ step_all() {
     fi
     state_done "kernel" || { echo "1" | { read _; select_and_install_kernel; }; }
     state_done "firmware" || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    state_done "de-hyprland" || install_de_profile "01-hyprland"
+    state_done "de-niri" || install_de_profile "10-niri"
     state_done "user" || create_user
     state_done "bootloader" || install_bootloader_complete "$DEPLOY_DIR/boot"
     cleanup_deploy

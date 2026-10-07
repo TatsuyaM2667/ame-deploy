@@ -1,5 +1,5 @@
 #!/bin/sh
-DEPLOY_VER="6.0.0"
+DEPLOY_VER="4.0.0"
 : "${TARGET:=}"; : "${ESP:=}"; : "${DEV:=}"; : "${P1:=}"; : "${P2:=}"; : "${STATE_DIR:=}"
 
 log_info() { printf "[INFO] %s\n" "$*"; }
@@ -91,7 +91,6 @@ enable_edge() {
     cat > "$TARGET/etc/apk/repositories" << 'REPOEOF'
 https://dl-cdn.alpinelinux.org/alpine/edge/main
 https://dl-cdn.alpinelinux.org/alpine/edge/community
-https://dl-cdn.alpinelinux.org/alpine/edge/testing
 REPOEOF
     chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
 }
