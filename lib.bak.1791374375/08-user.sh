@@ -9,7 +9,7 @@ create_user() {
         export PATH=/sbin:/usr/sbin:/bin:/usr/bin
         id '$uname' >/dev/null 2>&1 || adduser -D -s /bin/sh '$uname' 2>/dev/null || true
         echo '$uname:$upass' | chpasswd
-        for g in wheel video audio input seat netdev plugdev render; do
+        for g in wheel video audio input seat netdev plugdev; do
             addgroup '$uname' \$g 2>/dev/null || true
         done
         mkdir -p /home/$uname

@@ -43,7 +43,9 @@ write_limine_conf() {
         [ -b "$cand" ] && { RD="$cand"; break; }
     done
     [ -n "$RD" ] || { log_err "no root device"; return 1; }
+    log_info "root device: $RD"
 
+    # i915 は modprobe.d で設定するので cmdline では指定しない
     if [ -f "$ESP/EFI/BOOT/initramfs.cpio.gz" ]; then
         cat > "$ESP/EFI/BOOT/limine.conf" << L1
 timeout: 5
@@ -53,7 +55,7 @@ serial: yes
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     module_path: boot():/EFI/BOOT/initramfs.cpio.gz
-    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait i915.enable_guc=3
+    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait
 L1
         log_ok "limine.conf (initramfs, root=$RD)"
     else
@@ -64,7 +66,7 @@ serial: yes
 /Ame Linux
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
-    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init i915.enable_guc=3
+    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init
 L2
         log_warn "limine.conf (direct, root=$RD)"
     fi

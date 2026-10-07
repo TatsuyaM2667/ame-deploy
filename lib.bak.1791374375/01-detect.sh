@@ -36,10 +36,6 @@ detect_wifi() {
     fi
     echo unknown
 }
-detect_wifi_pci() {
-    # PCI ID (vendor:device) を返す - モジュール特定に使う
-    lspci -nn 2>/dev/null | grep -iE 'network|wireless' | grep -oE '[0-9a-f]{4}:[0-9a-f]{4}' | head -1
-}
 detect_eth() {
     for d in /sys/class/net/e*; do
         [ -e "$d" ] || continue
@@ -54,13 +50,12 @@ show_hw_summary() {
     echo "+--------------------------------------------------+"
     echo "|  Hardware detection                              |"
     echo "+--------------------------------------------------+"
-    printf "  %-12s: %s\n" "CPU" "$(detect_cpu)"
-    printf "  %-12s: %s\n" "Cores" "$(detect_cpu_cores)"
-    printf "  %-12s: %s MiB\n" "RAM" "$(detect_ram_mb)"
-    printf "  %-12s: %s\n" "GPU" "$(detect_gpu)"
-    printf "  %-12s: %s\n" "WiFi" "$(detect_wifi)"
-    printf "  %-12s: %s\n" "WiFi PCI" "$(detect_wifi_pci)"
-    printf "  %-12s: %s\n" "Ethernet" "$(detect_eth)"
+    printf "  %-8s: %s\n" "CPU" "$(detect_cpu)"
+    printf "  %-8s: %s\n" "Cores" "$(detect_cpu_cores)"
+    printf "  %-8s: %s MiB\n" "RAM" "$(detect_ram_mb)"
+    printf "  %-8s: %s\n" "GPU" "$(detect_gpu)"
+    printf "  %-8s: %s\n" "WiFi" "$(detect_wifi)"
+    printf "  %-8s: %s\n" "Ethernet" "$(detect_eth)"
     echo "--------------------------------------------------"
     lsblk -o NAME,SIZE,TYPE,MODEL 2>/dev/null | grep -vE 'loop|zram|sr0'
     echo "+--------------------------------------------------+"

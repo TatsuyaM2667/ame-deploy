@@ -8,12 +8,14 @@ copy_rootfs() {
     mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/run" "$TARGET/tmp" "$TARGET/mnt" "$TARGET/media"
     chmod 1777 "$TARGET/tmp" 2>/dev/null || true
     chmod 0700 "$TARGET/root" 2>/dev/null || true
-    # firmware 全体をコピー（重要）
+
+    # /lib/firmware がコピーされたか確認（重要）
     if [ -d "/lib/firmware" ]; then
         log_info "  /lib/firmware ..."
         mkdir -p "$TARGET/lib/firmware"
         cp -a /lib/firmware/. "$TARGET/lib/firmware/" 2>/dev/null || true
     fi
+
     log_ok "rootfs copied"
 }
 setup_target_skeleton() {
@@ -47,63 +49,35 @@ E3
         [ -e "$TARGET/etc/init.d/$s" ] && ln -sf "/etc/init.d/$s" "$TARGET/etc/runlevels/default/$s" 2>/dev/null || true
     done
 
-    # WiFi モジュール強制ロード設定
-    log_info "  /etc/modules (WiFi autoload)"
+    # ★ 重要: WiFi モジュールを強制ロード（Alpine mdev はデバイスID自動ロードしない）
+    log_info "  forcing WiFi modules in /etc/modules"
+    mkdir -p "$TARGET/etc/modules-load.d"
     cat > "$TARGET/etc/modules" << 'MOD'
-# ame-deploy v8.0: WiFi modules
+# ame-deploy: WiFi modules (auto-load at boot)
 rtw88_core
 rtw88_pci
 rtw88_8821ce
 rtw88_8821cu
 rtw88_8822be
 rtw88_8822ce
-rtw88_8822cu
-rtw88_8723de
-rtw88_8723du
 rtw89_core
 rtw89_pci
-rtw89_8851be
 rtw89_8852ae
 rtw89_8852be
 rtw89_8852ce
 iwlwifi
 mt7921e
-mt7921s
-mt7921u
-ath10k_pci
-ath11k_pci
-brcmfmac
 MOD
     log_ok "  /etc/modules written"
 
-    # i915 GuC/HuC 有効化
-    log_info "  /etc/modprobe.d/ame-i915.conf"
+    # ★ i915 カーネルパラメータを設定（GuC/HuC 有効化）
+    log_info "  writing /etc/modprobe.d/ame-i915.conf"
     mkdir -p "$TARGET/etc/modprobe.d"
     cat > "$TARGET/etc/modprobe.d/ame-i915.conf" << 'I915'
+# ame-deploy: i915 GPU settings
 options i915 enable_guc=3 enable_fbc=1 enable_psr=0
 I915
     log_ok "  i915 modprobe.conf written"
-
-    # wlroots 0.20+ 互換: DRM modifiers デフォルト無効
-    log_info "  /etc/environment.d (wlroots compat)"
-    mkdir -p "$TARGET/etc/environment.d"
-    cat > "$TARGET/etc/environment.d/10-wlroots.conf" << 'WLR'
-# ame-deploy: wlroots 0.20+ 互換性のためのデフォルト設定
-# (Sway 1.12 + i915 で初期化ハングを回避)
-WLR_DRM_NO_MODIFIERS=1
-WLR_RENDERER_ALLOW_SOFTWARE=1
-WLR_NO_HARDWARE_CURSORS=1
-WLR_LIBINPUT_NO_DEVICES=1
-WLR_RENDERER=pixman
-WLR_DRM_NO_ATOMIC=1
-WLR_DRM_NO_MODIFIERS=1
-WLR_RENDERER_ALLOW_SOFTWARE=1
-MOZ_ENABLE_WAYLAND=1
-QT_QPA_PLATFORM=wayland
-XDG_SESSION_TYPE=wayland
-XDG_CURRENT_DESKTOP=sway
-WLR
-    log_ok "  wlroots env written"
 
     log_ok "skeleton done"
 }

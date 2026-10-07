@@ -9,13 +9,13 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v7.0.0            |
-|   i915 GuC + WiFi firmware + kms initramfs           |
+|   Ame Linux Installer (ame-deploy) v8.0.0            |
+|   WiFi+GPU complete / Sway version-compat            |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
-|   [4] Install kernel (i915+kms verified)             |
+|   [4] Install kernel (modules+fw verified)           |
 |   [5] Install firmware / drivers                     |
 |   [6] Select desktop environment                     |
 |   [7] Create user                                    |
@@ -47,6 +47,7 @@ step3() {
     state_done "rootfs" && { log_info "rootfs already copied"; pause; return; }
     copy_rootfs; setup_target_skeleton; write_fstab
     state_mark "rootfs"
+    log_ok "rootfs copied"
     pause
 }
 step4() { require_disk || { pause; return; }; state_init; select_and_install_kernel; pause; }
@@ -55,20 +56,19 @@ step6() {
     require_disk || { pause; return; }
     state_init
     if ! state_done "kernel"; then
-        log_warn "kernel not installed - installing first"
+        log_warn "kernel not installed"
         select_and_install_kernel || { pause; return; }
     fi
     echo "  Profile:"
-    echo "    [1] Sway           (recommended, reliable)"
-    echo "    [2] Hyprland       (Wayland tiling)"
+    echo "    [1] Sway           (recommended, version-compat)"
+    echo "    [2] Hyprland"
     echo "    [3] River          (river-classic)"
     echo "    [4] GNOME"
     echo "    [5] KDE Plasma"
-    echo "    [6] Niri           (Rust, scrollable)"
-    echo "    [7] Miracle-WM     (Rust/WASM)"
+    echo "    [6] Niri"
+    echo "    [7] Miracle-WM"
     echo "    [8] MARSWM         (Rust, X11)"
     echo "    [9] orilla         (Rust, River WM)"
-    echo "    [10] RedIWM        (Zig, may fail)"
     echo "    [0] minimal"
     printf "  Select [1]: "; read d
     [ -z "$d" ] && d="1"
@@ -79,11 +79,10 @@ step6() {
         3) profile="02-river" ;;
         4) profile="04-gnome" ;;
         5) profile="05-kde" ;;
-        6) profile="10-niri" ;;
+        6) profile="06-niri" ;;
         7) profile="07-miracle-wm" ;;
         8) profile="08-marswm" ;;
         9) profile="09-orilla" ;;
-        10) profile="06-rediwm" ;;
         *) log_err "invalid"; pause; return ;;
     esac
     install_de_profile "$profile"

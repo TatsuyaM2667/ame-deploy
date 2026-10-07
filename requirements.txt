@@ -21,4 +21,5 @@ networkmanager-tui
 networkmanager-wifi
 wpa_supplicant
 wireless-regdb
+rfkill
 dhcpcd

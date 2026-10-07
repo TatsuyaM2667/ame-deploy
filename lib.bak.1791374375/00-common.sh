@@ -1,5 +1,5 @@
 #!/bin/sh
-DEPLOY_VER="8.0.0"
+DEPLOY_VER="7.0.0"
 : "${TARGET:=}"; : "${ESP:=}"; : "${DEV:=}"; : "${P1:=}"; : "${P2:=}"; : "${STATE_DIR:=}"
 
 log_info() { printf "[INFO] %s\n" "$*"; }
@@ -42,36 +42,14 @@ _umount_chroot_fs() {
     umount "$TARGET/proc" 2>/dev/null || true
 }
 
-# initramfs 検証: /init 存在 + i915 firmware 含む
 _verify_initramfs() {
     f="$1"; [ -f "$f" ] || return 1
     sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
     [ "$sz" -gt 500000 ] || return 1
     tmp="/tmp/irv-$$"; rm -rf "$tmp"; mkdir -p "$tmp"
     ( cd "$tmp" && zcat "$f" 2>/dev/null | cpio -idm --quiet 2>/dev/null )
-    rc=1
-    [ -e "$tmp/init" ] && rc=0
+    rc=1; [ -e "$tmp/init" ] && rc=0
     rm -rf "$tmp"; return $rc
-}
-
-# firmware 検証: .bin / .bin.zst / .ucode 両対応
-_verify_firmware_complete() {
-    ok=1
-    # i915 (GuC/HuC) - .bin or .bin.zst or .ucode
-    if ! ls "$TARGET/lib/firmware/i915/"* 2>/dev/null | grep -qiE 'guc|huc'; then
-        log_warn "    i915 GuC/HuC firmware MISSING"
-        ok=0
-    fi
-    # WiFi rtw88/rtw89
-    if ! ls "$TARGET/lib/firmware/rtw88/"* 2>/dev/null | grep -q .; then
-        log_warn "    rtw88 firmware MISSING"
-        ok=0
-    fi
-    if ! ls "$TARGET/lib/firmware/rtw89/"* 2>/dev/null | grep -q .; then
-        log_warn "    rtw89 firmware MISSING"
-        ok=0
-    fi
-    [ "$ok" = "1" ]
 }
 
 auto_mount_target() {
