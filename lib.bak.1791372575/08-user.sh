@@ -1,6 +1,8 @@
 #!/bin/sh
 create_user() {
-    state_done "user" && return 0
+    if state_done "user"; then
+        log_info "user already created"; return 0
+    fi
     printf "  username [ame]: "; read uname
     [ -z "$uname" ] && uname="ame"
     printf "  password: "; stty -echo; read upass; stty echo; echo
