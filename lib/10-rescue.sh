@@ -1,91 +1,168 @@
 #!/bin/sh
+# Full Rescue v0.9 - 壊れたインストールを全自動修復
+
 rescue_installed_system() {
-    log_info "=== Rescue ==="
-    ROOT=""
-    for d in /mnt/ame-target /mnt/ame /mnt; do
-        if [ -f "$d/etc/os-release" ] || [ -f "$d/sbin/init" ]; then ROOT="$d"; break; fi
-    done
-    [ -n "$ROOT" ] && [ -d "$ROOT/etc" ] || { log_err "no install found. mount /dev/sda2 /mnt/ame"; return 1; }
+    log_info "=========================================="
+    log_info " Full Rescue v0.9"
+    log_info "=========================================="
 
-    log_info "rescuing: $ROOT"
-    mv "$ROOT/etc/profile.d/ame-autostart.sh" "$ROOT/etc/profile.d/ame-autostart.sh.disabled" 2>/dev/null || true
+    # ---- 1. 自動マウント ----
+    auto_mount_target || { log_err "no install found"; return 1; }
+    log_ok "target: $TARGET"
 
-    mkdir -p "$ROOT/etc/elogind"
-    cat > "$ROOT/etc/elogind/logind.conf" << 'LEOF'
-[Login]
-KillUserProcesses=no
-RemoveIPC=no
-LEOF
+    # ---- 2. resolv.conf ----
+    cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
 
-    mkdir -p "$ROOT/etc/init.d"
-    cat > "$ROOT/etc/init.d/ame-runtime-dir" << 'SVC'
-#!/sbin/openrc-run
-name="ame-runtime-dir"
-description="Create /run/user"
-depend() { after elogind; need localmount; }
-start() {
-    ebegin "Creating /run/user"
-    mkdir -p /run/user; chmod 0755 /run/user
-    awk -F: '$3 >= 1000 && $3 < 60000 {print $3}' /etc/passwd | while read -r uid; do
-        mkdir -p "/run/user/$uid"; chmod 0700 "/run/user/$uid"; chown "$uid:$uid" "/run/user/$uid" 2>/dev/null || true
-    done
-    eend 0
-}
-SVC
-    chmod +x "$ROOT/etc/init.d/ame-runtime-dir"
-    for lvl in boot default; do
-        mkdir -p "$ROOT/etc/runlevels/$lvl"
-        ln -sf /etc/init.d/ame-runtime-dir "$ROOT/etc/runlevels/$lvl/ame-runtime-dir" 2>/dev/null || true
-    done
+    # ---- 3. edge repo ----
+    log_info "[1/7] edge repo"
+    [ -f "$TARGET/etc/apk/repositories.stable.bak" ] || \
+        cp "$TARGET/etc/apk/repositories" "$TARGET/etc/apk/repositories.stable.bak" 2>/dev/null || true
+    cat > "$TARGET/etc/apk/repositories" << 'REPOEOF'
+https://dl-cdn.alpinelinux.org/alpine/edge/main
+https://dl-cdn.alpinelinux.org/alpine/edge/community
+REPOEOF
 
-    mkdir -p "$ROOT/run/user"; chmod 0755 "$ROOT/run/user"
-    awk -F: '$3 >= 1000 && $3 < 60000 {print $3}' "$ROOT/etc/passwd" | while read -r uid; do
-        mkdir -p "$ROOT/run/user/$uid"; chmod 0700 "$ROOT/run/user/$uid"; chown "$uid:$uid" "$ROOT/run/user/$uid" 2>/dev/null || true
-    done
+    # ---- 4. kernel install / repair ----
+    log_info "[2/7] kernel"
+    _mount_chroot_fs
+    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
 
+    if [ ! -d "$TARGET/lib/modules" ] || [ -z "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ]; then
+        log_info "installing linux-lts"
+        chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories linux-lts mkinitfs linux-firmware-i915 linux-firmware-intel linux-firmware-rtw88 linux-firmware-rtw89 linux-firmware-amdgpu 2>&1 | tail -5' || true
+    fi
+    KVER=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
+    [ -n "$KVER" ] || { _umount_chroot_fs; log_err "no kernel modules"; return 1; }
+    log_ok "kernel: $KVER"
+
+    # ---- 5. initramfs 生成（3段フォールバック） ----
+    log_info "[3/7] initramfs"
+    img="initramfs-lts"
+    case "$KVER" in
+        *-edge) img="initramfs-edge" ;;
+        *-virt) img="initramfs-virt" ;;
+    esac
+
+    # 既存検証
+    if _verify_initramfs "$TARGET/boot/$img"; then
+        log_ok "existing initramfs valid"
+    else
+        rm -f "$TARGET/boot/$img"
+        # a) mkinitfs
+        for i in 1 2 3; do
+            log_info "  mkinitfs attempt $i/3"
+            chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkdir -p /boot; mkinitfs -o /boot/$img $KVER 2>&1 | tail -3" || true
+            _verify_initramfs "$TARGET/boot/$img" && { log_ok "  mkinitfs OK"; break; }
+            sleep 2
+        done
+        # b) フォールバック
+        if ! _verify_initramfs "$TARGET/boot/$img"; then
+            log_warn "  mkinitfs failed - generating fallback initramfs"
+            _generate_fallback_initramfs "$img" "$KVER"
+        fi
+    fi
+    _umount_chroot_fs
+
+    if ! _verify_initramfs "$TARGET/boot/$img"; then
+        log_err "initramfs generation failed"
+        return 1
+    fi
+    log_ok "initramfs ready: /boot/$img"
+
+    # ---- 6. ESP update ----
+    log_info "[4/7] ESP update"
+    bootdir="$DEPLOY_DIR/boot"
+    install_kernel_to_esp      || { log_err "kernel->ESP failed"; return 1; }
+    install_initramfs_to_esp   || { log_err "initramfs->ESP failed"; return 1; }
+    install_limine "$bootdir"  || { log_err "limine failed"; return 1; }
+    write_limine_conf          || { log_err "limine.conf failed"; return 1; }
+    register_uefi
+    sync
+
+    # ---- 7. services ----
+    log_info "[5/7] services"
     for s in dbus elogind seatd polkit networkmanager; do
-        for lvl in default boot; do
-            mkdir -p "$ROOT/etc/runlevels/$lvl"
-            [ -e "$ROOT/etc/init.d/$s" ] && ln -sf "/etc/init.d/$s" "$ROOT/etc/runlevels/$lvl/$s" 2>/dev/null || true
-        done
+        target_rc_add "$s" default 2>/dev/null || true
+        target_rc_add "$s" boot 2>/dev/null || true
     done
 
-    # Hyprland ABI 修復（del なし）
-    if [ -e "$ROOT/usr/bin/Hyprland" ]; then
-        log_info "Hyprland ABI fix"
-        mount -t proc     none "$ROOT/proc" 2>/dev/null || true
-        mount -t sysfs    none "$ROOT/sys"  2>/dev/null || true
-        mount -t devtmpfs none "$ROOT/dev"  2>/dev/null || true
-        chroot "$ROOT" /bin/sh -c '
-            export PATH=/sbin:/usr/sbin:/bin:/usr/bin
-            apk add --force-overwrite --force-missing-repositories libstdc++ libgcc gcc g++ >/dev/null 2>&1
-            apk add --force-overwrite --force-missing-repositories hyprland hyprutils hyprlang hyprcursor >/dev/null 2>&1
-        ' || true
-        umount "$ROOT/dev" 2>/dev/null || true
-        umount "$ROOT/sys" 2>/dev/null || true
-        umount "$ROOT/proc" 2>/dev/null || true
+    # ---- 8. runtime-dir ----
+    log_info "[6/7] runtime-dir"
+    install_runtime_dir_service
+
+    # ---- 9. autostart ----
+    log_info "[7/7] autostart"
+    if [ -x "$TARGET/usr/bin/river" ] || [ -x "$TARGET/usr/local/bin/river" ]; then
+        setup_generic_autostart "river"
+        log_ok "River autostart"
+    elif [ -x "$TARGET/usr/bin/sway" ]; then
+        setup_generic_autostart "sway"
+        log_ok "Sway autostart"
+    elif [ -x "$TARGET/usr/bin/Hyprland" ]; then
+        setup_generic_autostart "Hyprland"
+        log_ok "Hyprland autostart"
+    else
+        log_warn "no DE binary found - install DE via [6]"
     fi
 
-    # autostart 再作成
-    cat > "$ROOT/etc/profile.d/ame-autostart.sh" << 'AEOF'
-if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
-    UID_NUM="$(id -u)"
-    RDIR="/run/user/$UID_NUM"
-    i=0
-    while [ $i -lt 10 ]; do [ -d "$RDIR" ] && break; sleep 1; i=$((i+1)); done
-    [ -d "$RDIR" ] || mkdir -p "$RDIR" 2>/dev/null
-    if [ -d "$RDIR" ]; then
-        export XDG_RUNTIME_DIR="$RDIR"
-        chmod 0700 "$RDIR" 2>/dev/null
-        for c in Hyprland sway river; do
-            if command -v $c >/dev/null 2>&1; then $c; break; fi
-        done
-    fi
-fi
-AEOF
-    chmod +x "$ROOT/etc/profile.d/ame-autostart.sh"
-
-    log_ok "Rescue complete"
-    echo "  sync; umount $ROOT; reboot"
+    # ---- 完了 ----
+    echo
+    log_ok "=========================================="
+    log_ok " Full Rescue COMPLETE"
+    log_ok "=========================================="
+    echo "  ESP contents:"
+    ls -la "$ESP/EFI/BOOT/"
+    echo
+    echo "  Unmount and reboot:"
+    echo "    sync; umount $ESP $TARGET; reboot"
     return 0
+}
+
+# ---- フォールバック initramfs（busybox ベース） ----
+_generate_fallback_initramfs() {
+    local img="$1" kver="$2"
+    local tmp="$TARGET/tmp/fallback-ir"
+    rm -rf "$tmp"; mkdir -p "$tmp"/{bin,dev,proc,sys,newroot,lib/modules}
+
+    # busybox を探す（static 優先）
+    local bb=""
+    for cand in "$TARGET/bin/busybox.static" "$TARGET/bin/busybox"; do
+        [ -f "$cand" ] && { bb="$cand"; break; }
+    done
+    [ -n "$bb" ] || { log_err "no busybox"; return 1; }
+
+    cp "$bb" "$tmp/bin/busybox"
+    ln -sf busybox "$tmp/bin/sh"
+
+    # init
+    cat > "$tmp/init" << 'INITEOF'
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev 2>/dev/null || mount -t tmpfs none /dev
+mkdir -p /newroot
+ROOT=$(cat /proc/cmdline | tr ' ' '\n' | grep '^root=' | head -1 | cut -d= -f2-)
+[ -z "$ROOT" ] && ROOT=/dev/sda2
+echo "ame-initramfs: mounting $ROOT"
+for i in 1 2 3 4 5; do
+    mount -o rw "$ROOT" /newroot 2>/dev/null && break
+    sleep 1
+done
+if ! mountpoint -q /newroot; then
+    echo "ame-initramfs: FAILED to mount $ROOT"
+    exec /bin/sh
+fi
+exec switch_root /newroot /sbin/init
+INITEOF
+    chmod +x "$tmp/init"
+
+    # cpio
+    ( cd "$tmp" && find . | cpio -o -H newc 2>/dev/null | gzip > "$TARGET/boot/$img" )
+    rm -rf "$tmp"
+
+    if _verify_initramfs "$TARGET/boot/$img"; then
+        log_ok "fallback initramfs created"
+        return 0
+    fi
+    return 1
 }

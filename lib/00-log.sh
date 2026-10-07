@@ -67,3 +67,38 @@ _chroot_apk() {
 target_rc_add() {
     chroot "$TARGET" /bin/sh -c "rc-update add $1 ${2:-default} 2>/dev/null" || true
 }
+
+# ---- 内蔵ディスク自動検出 + マウント ----
+auto_mount_target() {
+    if mountpoint -q /mnt/ame-target 2>/dev/null; then
+        TARGET=/mnt/ame-target; ESP=/mnt/ame-esp
+        for d in sda nvme0n1 vda; do
+            if [ -b "/dev/${d}2" ]; then
+                DEV="/dev/$d"; P1="/dev/${d}1"; P2="/dev/${d}2"; break
+            fi
+            if [ -b "/dev/${d}p2" ]; then
+                DEV="/dev/$d"; P1="/dev/${d}p1"; P2="/dev/${d}p2"; break
+            fi
+        done
+        state_init; return 0
+    fi
+
+    mkdir -p /mnt/ame-target /mnt/ame-esp
+    for d in sda nvme0n1 vda; do
+        if [ -b "/dev/${d}2" ]; then
+            P2="/dev/${d}2"; P1="/dev/${d}1"; DEV="/dev/$d"
+        elif [ -b "/dev/${d}p2" ]; then
+            P2="/dev/${d}p2"; P1="/dev/${d}p1"; DEV="/dev/$d"
+        else
+            continue
+        fi
+        if mount "$P2" /mnt/ame-target 2>/dev/null; then
+            mount "$P1" /mnt/ame-esp 2>/dev/null || true
+            TARGET=/mnt/ame-target; ESP=/mnt/ame-esp
+            state_init
+            log_ok "auto-mounted: $P2 -> $TARGET"
+            return 0
+        fi
+    done
+    return 1
+}
