@@ -1,5 +1,4 @@
 #!/bin/sh
-# ame-deploy v0.4
 SELF="$(readlink -f "$0")"
 DEPLOY_DIR="$(dirname "$SELF")"
 
@@ -7,7 +6,6 @@ for _f in "$DEPLOY_DIR"/lib/*.sh; do
     [ -f "$_f" ] && . "$_f"
 done
 
-# フォールバック
 command -v log_info >/dev/null 2>&1 || log_info() { echo "[INFO] $*"; }
 command -v log_ok   >/dev/null 2>&1 || log_ok()   { echo "[ OK ] $*"; }
 command -v log_warn >/dev/null 2>&1 || log_warn() { echo "[WARN] $*" >&2; }
@@ -20,20 +18,21 @@ banner() {
     clear
     cat << 'BEOF'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v0.4              |
-|   robust / rescue-capable / Hyprland-ready           |
+|   Ame Linux Installer (ame-deploy) v0.6              |
+|   kernel selectable / Hyprland bulletproof           |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
-|   [4] Install firmware / drivers                     |
-|   [5] Select desktop environment                     |
-|   [6] Create user                                    |
-|   [7] Install bootloader                             |
-|   [8] Verify install                                 |
+|   [4] Install kernel (linux-lts / linux-edge)        |
+|   [5] Install firmware / drivers                     |
+|   [6] Select desktop environment                     |
+|   [7] Create user                                    |
+|   [8] Install bootloader                             |
+|   [9] Verify install                                 |
 |                                                      |
 |   [R] Rescue (fix broken install)                    |
-|   [A] Full auto (1-8)                                |
+|   [A] Full auto (1-9)                                |
 |   [S] Shell    [X] Reboot  [P] Poweroff  [Q] Quit    |
 +------------------------------------------------------+
 BEOF
@@ -62,12 +61,25 @@ step3() {
 
 step4() {
     require_disk || { pause; return; }
-    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    select_and_install_kernel
     pause
 }
 
 step5() {
     require_disk || { pause; return; }
+    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    pause
+}
+
+step6() {
+    require_disk || { pause; return; }
+
+    # kernel 未インストールなら自動
+    if [ ! -d "$TARGET/lib/modules" ] || [ -z "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ]; then
+        log_warn "kernel modules missing - installing linux-lts first"
+        select_and_install_kernel || { log_err "kernel install failed"; pause; return; }
+    fi
+
     echo
     echo "  Profile:"
     echo "    [0] minimal (CUI only)"
@@ -112,9 +124,9 @@ step5() {
     pause
 }
 
-step6() { require_disk || { pause; return; }; create_user; pause; }
+step7() { require_disk || { pause; return; }; create_user; pause; }
 
-step7() {
+step8() {
     require_disk || { pause; return; }
     install_bootloader_complete "$DEPLOY_DIR/boot" || { log_err "bootloader failed"; pause; return; }
     cleanup_deploy
@@ -123,24 +135,42 @@ step7() {
     pause
 }
 
-step8() { require_disk || { pause; return; }; verify_target; pause; }
+step9() { require_disk || { pause; return; }; verify_target; pause; }
 
-rescue() { rescue_installed_system; pause; }
+step_rescue() { rescue_installed_system; pause; }
 
 step_all() {
     printf "  Full auto? [y/N] > "; read c
     [ "$c" = "y" ] || return
     show_hw_summary
+
     select_disk       || return
     umount_disk
     partition_disk    || return
     format_partitions || return
     mount_target      || return
+
     copy_rootfs
     setup_target_skeleton
     write_fstab
+
+    # kernel (linux-lts default)
+    KPKG="linux-lts"; KIMG="vmlinuz-lts"; KINITRD="initramfs-lts"
+    log_info "installing $KPKG (default)"
+    select_and_install_kernel <<< "1" || return
+
     install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    install_de_profile 00-minimal none
+
+    printf "  Profile [0-5] (default 4=Hyprland) > "; read p
+    case "$p" in
+        0) install_de_profile "00-minimal" none ;;
+        1) install_de_profile "01-river" none ;;
+        2) install_de_profile "02-kde" sddm ;;
+        3) install_de_profile "03-gnome" gdm ;;
+        5) install_de_profile "05-sway" none ;;
+        *) install_de_profile "04-hyprland" none ;;
+    esac
+
     create_user
     install_bootloader_complete "$DEPLOY_DIR/boot" || return
     cleanup_deploy
@@ -154,7 +184,6 @@ step_all() {
 
 require_root
 
-# 依存セルフチェック
 if [ -f "$DEPLOY_DIR/requirements.txt" ]; then
     _pkgs=$(grep -v '^#' "$DEPLOY_DIR/requirements.txt" | grep -v '^$' | tr '\n' ' ')
     _miss=""
@@ -180,7 +209,8 @@ while true; do
         6) step6 ;;
         7) step7 ;;
         8) step8 ;;
-        R|r) rescue ;;
+        9) step9 ;;
+        R|r) step_rescue ;;
         A|a) step_all ;;
         S|s) /bin/sh ;;
         X|x) reboot ;;
