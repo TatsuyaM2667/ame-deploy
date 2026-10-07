@@ -159,3 +159,45 @@ LEOF
     cat "$ESP/EFI/BOOT/limine.conf"
     return 0
 }
+
+# ============ v1.0.4 final override ============
+write_limine_conf() {
+    # 内蔵 root デバイスを特定
+    local RD=""
+    for cand in /dev/sda2 /dev/nvme0n1p2 /dev/vda2; do
+        [ -b "$cand" ] && { RD="$cand"; break; }
+    done
+    [ -n "$RD" ] || { log_err "no root device"; return 1; }
+
+    log_info "root device: $RD"
+
+    if [ -f "$ESP/EFI/BOOT/initramfs.cpio.gz" ]; then
+        cat > "$ESP/EFI/BOOT/limine.conf" << LEOF
+timeout: 5
+serial: yes
+
+/Ame Linux
+    protocol: linux
+    kernel_path: boot():/EFI/BOOT/vmlinuz-ame
+    module_path: boot():/EFI/BOOT/initramfs.cpio.gz
+    cmdline: console=tty0 loglevel=7 ignore_loglevel root=$RD rootfstype=ext4 rw rootwait
+LEOF
+        log_ok "limine.conf (initramfs, root=$RD)"
+    else
+        cat > "$ESP/EFI/BOOT/limine.conf" << LEOF
+timeout: 5
+serial: yes
+
+/Ame Linux
+    protocol: linux
+    kernel_path: boot():/EFI/BOOT/vmlinuz-ame
+    cmdline: console=tty0 loglevel=7 ignore_loglevel root=$RD rootfstype=ext4 rw rootwait init=/sbin/init
+LEOF
+        log_warn "limine.conf (direct, root=$RD)"
+    fi
+
+    echo "==== limine.conf ===="
+    cat "$ESP/EFI/BOOT/limine.conf"
+    echo "====================="
+    return 0
+}
