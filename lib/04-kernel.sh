@@ -61,6 +61,8 @@ REPOEOF
     log_ok "kernel modules: $KVER"
 
     log_info "[4/4] generating initramfs"
+    # chroot mkinitfs には /proc /sys /dev が必須
+    _mount_chroot_fs
     for v in $(ls "$TARGET/lib/modules"); do
         img="initramfs-${v##*-}"
         case "$v" in
@@ -76,6 +78,7 @@ REPOEOF
             [ -f "$TARGET/boot/$img" ] && log_ok "  $img OK" || log_warn "  $img failed"
         fi
     done
+    _umount_chroot_fs
 
     # 最終確認
     if ! ls "$TARGET/boot/initramfs-"* >/dev/null 2>&1; then

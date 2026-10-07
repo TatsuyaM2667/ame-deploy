@@ -17,7 +17,6 @@ get_target_initrd() {
 }
 
 ensure_initramfs() {
-    # initramfs が無ければ mkinitfs で生成
     local kver=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
     [ -n "$kver" ] || { log_err "no kernel modules"; return 1; }
 
@@ -35,44 +34,23 @@ ensure_initramfs() {
     fi
 
     log_info "initramfs missing - generating via mkinitfs"
-    cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
 
-    # mkinitfs が無ければ install
+    # /proc /sys /dev マウント（mkinitfs 必須）
+    _mount_chroot_fs
+
+    # mkinitfs が無ければ入れる
     chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; command -v mkinitfs >/dev/null 2>&1 || apk add --no-cache --force-missing-repositories mkinitfs >/dev/null 2>&1'
 
     chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkinitfs -o /boot/$img $kver 2>&1 | tail -5"
+
+    _umount_chroot_fs
 
     if [ -f "$TARGET/boot/$img" ]; then
         log_ok "initramfs generated: /boot/$img"
         echo "$img" > /tmp/ame-kinitrd
         return 0
     fi
-
-    # 最終手段: 空の initramfs を作る（rootfs direct boot は可能）
-    log_warn "mkinitfs failed - creating minimal initramfs"
-    mkdir -p "$TARGET/tmp/mini-initrd"
-    chroot "$TARGET" /bin/sh -c '
-        export PATH=/sbin:/usr/sbin:/bin:/usr/bin
-        mkdir -p /tmp/mini-initrd
-        cd /tmp/mini-initrd
-        mkdir -p bin dev proc sys mnt
-        cp /bin/busybox bin/ 2>/dev/null
-        ln -sf busybox bin/sh 2>/dev/null
-        echo "#!/bin/sh" > init
-        echo "mount -t proc none /proc" >> init
-        echo "mount -t sysfs none /sys" >> init
-        echo "mount -t devtmpfs none /dev" >> init
-        echo "exec /sbin/init" >> init
-        chmod +x init
-        find . | cpio -o -H newc 2>/dev/null | gzip > /boot/'"$img"'
-    '
-    if [ -f "$TARGET/boot/$img" ]; then
-        log_ok "minimal initramfs created"
-        echo "$img" > /tmp/ame-kinitrd
-        return 0
-    fi
-
-    log_err "cannot create initramfs"
+    log_err "initramfs unavailable"
     return 1
 }
 

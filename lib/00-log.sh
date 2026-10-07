@@ -68,3 +68,22 @@ target_rc_add() {
 target_apk_add() {
     chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $* 2>&1" | tail -5
 }
+
+# ---- chroot 前のマウントヘルパ ----
+_mount_chroot_fs() {
+    [ -n "$TARGET" ] || return 0
+    mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/dev/pts" "$TARGET/dev/shm"
+    mountpoint -q "$TARGET/proc" || mount -t proc     none "$TARGET/proc" 2>/dev/null || true
+    mountpoint -q "$TARGET/sys"  || mount -t sysfs    none "$TARGET/sys"  2>/dev/null || true
+    mountpoint -q "$TARGET/dev"  || mount -t devtmpfs none "$TARGET/dev"  2>/dev/null || true
+    mountpoint -q "$TARGET/dev/pts" || mount -t devpts none "$TARGET/dev/pts" 2>/dev/null || true
+}
+
+_umount_chroot_fs() {
+    [ -n "$TARGET" ] || return 0
+    umount "$TARGET/dev/pts" 2>/dev/null || true
+    umount "$TARGET/dev/shm" 2>/dev/null || true
+    umount "$TARGET/dev"     2>/dev/null || true
+    umount "$TARGET/sys"     2>/dev/null || true
+    umount "$TARGET/proc"    2>/dev/null || true
+}
