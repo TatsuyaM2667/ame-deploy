@@ -4,6 +4,7 @@ device-mapper
 e2fsprogs
 e2fsprogs-extra
 pciutils
+usbutils
 util-linux
 tar
 xz
@@ -17,6 +18,7 @@ htop
 networkmanager
 networkmanager-cli
 networkmanager-tui
+networkmanager-wifi
 wpa_supplicant
 wireless-regdb
 dhcpcd

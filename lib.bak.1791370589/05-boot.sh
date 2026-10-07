@@ -53,7 +53,7 @@ serial: yes
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     module_path: boot():/EFI/BOOT/initramfs.cpio.gz
-    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait i915.enable_guc=2
+    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait
 L1
         log_ok "limine.conf (initramfs, root=$RD)"
     else
@@ -64,7 +64,7 @@ serial: yes
 /Ame Linux
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
-    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init i915.enable_guc=2
+    cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init
 L2
         log_warn "limine.conf (direct, root=$RD)"
     fi

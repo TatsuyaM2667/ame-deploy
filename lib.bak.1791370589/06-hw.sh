@@ -8,7 +8,6 @@ install_hw_firmware() {
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
     install_kernel_firmware
     pkgs_optional "mesa" mesa mesa-dri-gallium mesa-vulkan-intel mesa-vulkan-ati
-    pkgs_optional "i915-firmware" linux-firmware-i915
     state_mark "firmware"
     log_ok "firmware done"
 }

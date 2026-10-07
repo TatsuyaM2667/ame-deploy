@@ -9,8 +9,8 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v6.1.0            |
-|   MARSWM / orilla / Niri added                       |
+|   Ame Linux Installer (ame-deploy) v6.2.0            |
+|   i915 fixed / WiFi reliable / All DEs               |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |

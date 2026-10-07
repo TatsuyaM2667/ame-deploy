@@ -140,7 +140,7 @@ NMEOF
 
 rescue_installed_system() {
     log_info "=========================================="
-    log_info " Full Rescue v6.2"
+    log_info " Full Rescue v6.1"
     log_info "=========================================="
     auto_mount_target || { log_err "no install found"; return 1; }
     log_ok "target: $TARGET"
@@ -152,7 +152,7 @@ rescue_installed_system() {
     KVER=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
     mkdir -p "$TARGET/etc/mkinitfs"
     cat > "$TARGET/etc/mkinitfs/mkinitfs.conf" << 'MK'
-features="ata base ide scsi usb virtio ext4 nvme i915 rtw88 rtw89"
+features="ata base ide scsi usb virtio ext4 nvme"
 MK
     img="initramfs-lts"
     case "$KVER" in
@@ -182,7 +182,7 @@ MK
     ensure_user_homes
     setup_autostart_sway
     log_ok "=========================================="
-    log_ok " Rescue v6.2 COMPLETE"
+    log_ok " Rescue v6.1 COMPLETE"
     log_ok "=========================================="
     log_info "Kernel: $KVER"
     log_info "WiFi: NetworkManager + wpa_supplicant + modules"

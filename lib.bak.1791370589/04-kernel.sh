@@ -79,8 +79,13 @@ select_and_install_kernel() {
     log_info "generating initramfs"
     mkdir -p "$TARGET/etc/mkinitfs"
     cat > "$TARGET/etc/mkinitfs/mkinitfs.conf" << 'MK'
-features="ata base ide scsi usb virtio ext4 nvme i915 rtw88 rtw89"
+features="ata base ide scsi usb virtio ext4 nvme"
 MK
+    img="initramfs-lts"
+    case "$KVER" in
+        *-edge) img="initramfs-edge" ;;
+        *-virt) img="initramfs-virt" ;;
+    esac
     _mount_chroot_fs
     i=0
     while [ $i -lt 3 ]; do

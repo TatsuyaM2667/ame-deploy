@@ -26,7 +26,7 @@ ensure_build_tools() {
 }
 
 # ============================================================
-# MARSWM (Rust, X11)
+# MARSWM (Rust, X11) - git clone + cargo build
 # ============================================================
 install_marswm_complete() {
     if state_done "de-marswm" && chroot "$TARGET" /bin/sh -c 'command -v marswm >/dev/null 2>&1'; then
@@ -85,7 +85,7 @@ RC
 }
 
 # ============================================================
-# Niri (Rust, scrollable tiling)
+# Niri (Rust, scrollable tiling) - Alpine package
 # ============================================================
 install_niri_complete() {
     if state_done "de-niri" && chroot "$TARGET" /bin/sh -c 'command -v niri >/dev/null 2>&1'; then
@@ -105,7 +105,7 @@ install_niri_complete() {
 }
 
 # ============================================================
-# RedIWM (Zig)
+# RedIWM (Zig) - git clone + zig build
 # ============================================================
 install_rediwm_complete() {
     if state_done "de-rediwm" && chroot "$TARGET" /bin/sh -c 'command -v rediwm >/dev/null 2>&1'; then
