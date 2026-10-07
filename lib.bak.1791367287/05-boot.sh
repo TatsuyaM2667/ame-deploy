@@ -1,12 +1,12 @@
 #!/bin/sh
 get_target_kernel() {
-    for k in vmlinuz-lts vmlinuz-stable vmlinuz-virt; do
+    for k in vmlinuz-lts vmlinuz-edge vmlinuz-virt; do
         [ -f "$TARGET/boot/$k" ] && echo "$k" && return
     done
     echo ""
 }
 get_target_initrd() {
-    for i in initramfs-lts initramfs-stable initramfs-virt; do
+    for i in initramfs-lts initramfs-edge initramfs-virt; do
         [ -f "$TARGET/boot/$i" ] && echo "$i" && return
     done
     echo ""
@@ -66,7 +66,7 @@ serial: yes
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init
 L2
-        log_warn "limine.conf (direct, root=$RD)"
+        log_warn "limine.conf (direct)"
     fi
 }
 register_uefi() {

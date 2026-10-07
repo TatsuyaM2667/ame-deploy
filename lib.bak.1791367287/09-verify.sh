@@ -15,9 +15,11 @@ verify_target() {
     check /etc/fstab
     check /etc/hostname
     check /etc/elogind/logind.conf
+
     KVER=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
     if [ -n "$KVER" ]; then
         echo "  [OK]  /lib/modules/$KVER"; ok=$((ok+1))
+        # 必須モジュール
         if find "$TARGET/lib/modules/$KVER/kernel/drivers/net/wireless" -name '*.ko*' 2>/dev/null | head -1 | grep -q .; then
             echo "  [OK]  wireless modules"; ok=$((ok+1))
         else
@@ -26,6 +28,7 @@ verify_target() {
     else
         echo "  [NG]  /lib/modules"; bad=$((bad+1))
     fi
+
     echo "  OK=$ok NG=$bad"
     echo "=== ESP ==="
     ls -la "$ESP/EFI/BOOT/" 2>/dev/null

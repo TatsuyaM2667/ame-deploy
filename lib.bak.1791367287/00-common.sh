@@ -1,5 +1,5 @@
 #!/bin/sh
-DEPLOY_VER="4.0.0"
+DEPLOY_VER="3.0.0"
 : "${TARGET:=}"; : "${ESP:=}"; : "${DEV:=}"; : "${P1:=}"; : "${P2:=}"; : "${STATE_DIR:=}"
 
 log_info() { printf "[INFO] %s\n" "$*"; }
@@ -82,6 +82,7 @@ target_rc_add() {
     chroot "$TARGET" /bin/sh -c "rc-update add $svc $level 2>/dev/null" || true
 }
 
+# edge repo + resolv.conf
 enable_edge() {
     [ -n "$TARGET" ] || return 1
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
@@ -95,6 +96,7 @@ REPOEOF
     chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
 }
 
+# 個別パッケージインストール
 pkgs_optional() {
     label="$1"; shift
     log_info "  $label"

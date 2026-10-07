@@ -47,7 +47,7 @@ write_fstab() {
     rp=$(blkid -s PARTUUID -o value "$P2")
     cat > "$TARGET/etc/fstab" << E4
 PARTUUID=$rp / ext4 defaults,noatime 0 1
-PARTUUID=$ep /boot vfat defaults,noatime 0 1
+PARTUUID=$ep /boot vfat defaults,noatime 0 2
 E4
     log_ok "fstab done"
 }

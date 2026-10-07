@@ -9,8 +9,8 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v3.0.0            |
-|   Kernel verified / WiFi auto / Sway primary          |
+|   Ame Linux Installer (ame-deploy) v4.0.0            |
+|   Kernel verified / WiFi auto / RedIWM ready         |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
@@ -60,21 +60,23 @@ step6() {
         select_and_install_kernel || { pause; return; }
     fi
     echo "  Profile:"
-    echo "    [1] Sway           (default, reliable)"
-    echo "    [2] River          (river-classic if available)"
-    echo "    [3] KDE Plasma"
+    echo "    [1] Hyprland       (Wayland tiling, rich ricing)"
+    echo "    [2] River          (river-classic)"
+    echo "    [3] Sway           (reliable, i3-compatible)"
     echo "    [4] GNOME"
-    echo "    [5] Hyprland       (best-effort)"
+    echo "    [5] KDE Plasma"
+    echo "    [6] RedIWM         (Zig, lightweight)"
     echo "    [0] minimal"
     printf "  Select [1]: "; read d
     [ -z "$d" ] && d="1"
     case "$d" in
         0) profile="00-minimal" ;;
-        1) profile="05-sway" ;;
-        2) profile="01-river" ;;
-        3) profile="02-kde" ;;
-        4) profile="03-gnome" ;;
-        5) profile="04-hyprland" ;;
+        1) profile="01-hyprland" ;;
+        2) profile="02-river" ;;
+        3) profile="03-sway" ;;
+        4) profile="04-gnome" ;;
+        5) profile="05-kde" ;;
+        6) profile="06-rediwm" ;;
         *) log_err "invalid"; pause; return ;;
     esac
     install_de_profile "$profile"
@@ -95,7 +97,7 @@ step_rescue() { rescue_installed_system; pause; }
 step_progress() { auto_mount_target 2>/dev/null || true; echo "=== State ==="; state_list; pause; }
 
 step_all() {
-    printf "  FULL AUTO (Sway default)? [y/N] > "; read c
+    printf "  FULL AUTO (Hyprland default)? [y/N] > "; read c
     [ "$c" = "y" ] || return
     show_hw_summary
     state_init
@@ -111,7 +113,7 @@ step_all() {
     fi
     state_done "kernel" || { echo "1" | { read _; select_and_install_kernel; }; }
     state_done "firmware" || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    state_done "de-sway" || install_de_profile "05-sway"
+    state_done "de-hyprland" || install_de_profile "01-hyprland"
     state_done "user" || create_user
     state_done "bootloader" || install_bootloader_complete "$DEPLOY_DIR/boot"
     cleanup_deploy
