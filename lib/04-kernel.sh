@@ -81,15 +81,34 @@ select_and_install_kernel() {
     cat > "$TARGET/etc/mkinitfs/mkinitfs.conf" << 'MK'
 features="ata base ide scsi usb virtio ext4 nvme i915 rtw88 rtw89"
 MK
+    # ★ initramfs 名を決定（v6.2.1 fix）
+    img="initramfs-lts"
+    case "$KVER" in
+        *-lts)    img="initramfs-lts" ;;
+        *-edge)   img="initramfs-edge" ;;
+        *-stable) img="initramfs-stable" ;;
+        *-virt)   img="initramfs-virt" ;;
+    esac
+    log_info "  initramfs name: $img"
+
+    mkdir -p "$TARGET/boot"
     _mount_chroot_fs
+    chroot "$TARGET" /bin/sh -c 'mkdir -p /boot'
+
     i=0
     while [ $i -lt 3 ]; do
         i=$((i+1))
         if _verify_initramfs "$TARGET/boot/$img"; then break; fi
-        rm -f "$TARGET/boot/$img"
-        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkdir -p /boot; mkinitfs -o /boot/$img $KVER 2>&1 | tail -3" || true
+        [ -f "$TARGET/boot/$img" ] && rm -f "$TARGET/boot/$img"
+        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkinitfs -o /boot/$img $KVER 2>&1 | tail -3" || true
     done
     _umount_chroot_fs
+
+    if ! _verify_initramfs "$TARGET/boot/$img"; then
+        log_err "initramfs generation failed"
+        return 1
+    fi
+    log_ok "initramfs ready: /boot/$img"
     _verify_initramfs "$TARGET/boot/$img" || { log_err "initramfs failed"; return 1; }
     echo "$KVER" > /tmp/ame-kver
     echo "$img" > /tmp/ame-kinitrd
