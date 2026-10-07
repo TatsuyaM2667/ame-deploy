@@ -14,14 +14,16 @@ verify_target() {
     check /etc/passwd
     check /etc/fstab
     check /etc/hostname
-    check /etc/elogind/logind.conf
     [ -d "$TARGET/lib/modules" ] && { echo "  [OK]  /lib/modules"; ok=$((ok+1)); } || { echo "  [NG]  /lib/modules"; bad=$((bad+1)); }
     echo "  OK=$ok NG=$bad"
-    echo "=== ESP ==="
+    echo
+    echo "=== ESP files ==="
     ls -la "$ESP/EFI/BOOT/" 2>/dev/null
+    echo "=== Boot chain ==="
     for f in BOOTX64.EFI vmlinuz-ame limine.conf initramfs.cpio.gz; do
         [ -f "$ESP/EFI/BOOT/$f" ] && echo "  [OK]  $f" || echo "  [NG]  $f"
     done
+    echo
     echo "=== State ==="
     state_list
     return 0

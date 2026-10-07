@@ -1,14 +1,14 @@
 #!/bin/sh
-detect_cpu() { grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown; }
+detect_cpu()       { grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown; }
 detect_cpu_cores() { nproc 2>/dev/null || echo 1; }
-detect_ram_mb() { awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo; }
+detect_ram_mb()    { awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo; }
 detect_gpu() {
     if command -v lspci >/dev/null 2>&1; then
         l=$(lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | head -1)
         case "$l" in
             *1002:*|*AMD*|*Radeon*) echo amd; return ;;
-            *8086:*|*Intel*) echo intel; return ;;
-            *10de:*|*NVIDIA*) echo nvidia; return ;;
+            *8086:*|*Intel*)        echo intel; return ;;
+            *10de:*|*NVIDIA*)       echo nvidia; return ;;
         esac
     fi
     for v in /sys/class/drm/card*/device/vendor; do
@@ -50,11 +50,11 @@ show_hw_summary() {
     echo "+--------------------------------------------------+"
     echo "|  Hardware detection                              |"
     echo "+--------------------------------------------------+"
-    printf "  %-8s: %s\n" "CPU" "$(detect_cpu)"
-    printf "  %-8s: %s\n" "Cores" "$(detect_cpu_cores)"
-    printf "  %-8s: %s MiB\n" "RAM" "$(detect_ram_mb)"
-    printf "  %-8s: %s\n" "GPU" "$(detect_gpu)"
-    printf "  %-8s: %s\n" "WiFi" "$(detect_wifi)"
+    printf "  %-8s: %s\n" "CPU"      "$(detect_cpu)"
+    printf "  %-8s: %s\n" "Cores"    "$(detect_cpu_cores)"
+    printf "  %-8s: %s MiB\n" "RAM"  "$(detect_ram_mb)"
+    printf "  %-8s: %s\n" "GPU"      "$(detect_gpu)"
+    printf "  %-8s: %s\n" "WiFi"     "$(detect_wifi)"
     printf "  %-8s: %s\n" "Ethernet" "$(detect_eth)"
     echo "--------------------------------------------------"
     lsblk -o NAME,SIZE,TYPE,MODEL 2>/dev/null | grep -vE 'loop|zram|sr0'
