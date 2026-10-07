@@ -32,7 +32,7 @@ fix_libstdcpp_abi() {
     ' || true
 }
 
-# ---- Hyprland install with retry ----
+# ---- Hyprland install with retry（del なし） ----
 install_hyprland_with_retry() {
     local max=3 i=0
     while [ $i -lt $max ]; do
@@ -45,27 +45,32 @@ install_hyprland_with_retry() {
             return 0
         fi
 
-        # インストール / 修復
-        if chroot "$TARGET" /bin/sh -c 'command -v Hyprland >/dev/null 2>&1'; then
-            log_warn "  binary exists but ABI error - fixing"
-            fix_libstdcpp_abi
-            if hyprland_works; then
-                log_ok "  Hyprland fixed"
-                return 0
-            fi
-            log_warn "  retry full reinstall"
-            chroot "$TARGET" /bin/sh -c '
-                export PATH=/sbin:/usr/sbin:/bin:/usr/bin
-                apk del hyprland hyprutils hyprlang hyprcursor 2>/dev/null
-                apk add --no-cache --force-missing-repositories hyprland hyprutils hyprlang hyprcursor 2>&1 | tail -3
-            ' || true
-        else
+        # バイナリ無し → fresh install
+        if ! chroot "$TARGET" /bin/sh -c 'command -v Hyprland >/dev/null 2>&1'; then
+            log_info "  Hyprland binary missing - installing"
             chroot "$TARGET" /bin/sh -c '
                 export PATH=/sbin:/usr/sbin:/bin:/usr/bin
                 apk add --no-cache --force-missing-repositories hyprland 2>&1 | tail -5
             ' || true
+        else
+            # バイナリ有り → ABI 修復のみ（del しない）
+            log_warn "  ABI error detected - forcing libstdc++ upgrade"
+            chroot "$TARGET" /bin/sh -c '
+                export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+                apk add --force-overwrite --force-missing-repositories \
+                    libstdc++ libgcc gcc g++ 2>&1 | tail -3
+                apk add --force-overwrite --force-missing-repositories \
+                    hyprland hyprutils hyprlang hyprcursor hyprgraphics 2>&1 | tail -3
+            ' || true
+        fi
+
+        # 再判定
+        if hyprland_works; then
+            log_ok "  Hyprland fixed"
+            return 0
         fi
     done
+
     log_err "  Hyprland failed after $max attempts"
     return 1
 }
@@ -104,8 +109,14 @@ REPOEOF
     # Hyprland with retry
     log_info "[5/6] Hyprland ecosystem"
     if ! install_hyprland_with_retry; then
-        log_err "Hyprland install failed"
-        return 1
+        log_warn "Hyprland unavailable on current edge snapshot"
+        log_info "Installing Sway as fallback Wayland compositor"
+        install_pkgs_optional "sway-fallback" sway swaybg waybar foot fuzzel mako
+        install_pkgs_optional "sway-runtime" seatd seatd-openrc xdg-desktop-portal-wlr grim slurp wl-clipboard brightnessctl
+        setup_generic_autostart "sway"
+        state_mark "hyprland"
+        log_warn "Hyprland failed - Sway installed instead"
+        return 0
     fi
 
     # optional portals
