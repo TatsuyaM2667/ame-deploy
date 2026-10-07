@@ -43,6 +43,10 @@ state_list() {
 
 # ---- chroot マウントヘルパ ----
 _mount_chroot_fs() {
+    mkdir -p "$TARGET/etc/mkinitfs" 2>/dev/null
+    if [ -n "$TARGET" ] && [ ! -f "$TARGET/etc/mkinitfs/mkinitfs.conf" ]; then
+        printf 'features="ata base ide scsi usb virtio ext4 nvme"\n' > "$TARGET/etc/mkinitfs/mkinitfs.conf"
+    fi
     [ -n "$TARGET" ] || return 0
     mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/dev/pts" "$TARGET/dev/shm"
     mountpoint -q "$TARGET/proc"    || mount -t proc     none "$TARGET/proc"    2>/dev/null || true
@@ -109,6 +113,10 @@ auto_mount_target() {
 
 # chroot 内 /proc /sys /dev をマウント
 _mount_chroot_fs() {
+    mkdir -p "$TARGET/etc/mkinitfs" 2>/dev/null
+    if [ -n "$TARGET" ] && [ ! -f "$TARGET/etc/mkinitfs/mkinitfs.conf" ]; then
+        printf 'features="ata base ide scsi usb virtio ext4 nvme"\n' > "$TARGET/etc/mkinitfs/mkinitfs.conf"
+    fi
     [ -n "$TARGET" ] || return 0
     mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/dev/pts" "$TARGET/dev/shm"
     mountpoint -q "$TARGET/proc" || mount -t proc     none "$TARGET/proc" 2>/dev/null || true

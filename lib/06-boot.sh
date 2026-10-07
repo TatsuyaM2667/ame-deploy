@@ -75,7 +75,7 @@ serial: yes
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     module_path: boot():/EFI/BOOT/initramfs.cpio.gz
-    cmdline: console=tty0 console=ttyS0,115200 quiet loglevel=3 root=PARTUUID=$rp rootfstype=ext4 rw
+    cmdline: console=tty0 console=ttyS0,115200 loglevel=7 ignore_loglevel root=PARTUUID=$rp rootfstype=ext4 rw
 LEOF
         log_ok "limine.conf (with initramfs)"
     else
@@ -86,7 +86,7 @@ serial: yes
 /Ame Linux
     protocol: linux
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
-    cmdline: console=tty0 console=ttyS0,115200 quiet loglevel=3 root=PARTUUID=$rp rootfstype=ext4 rw init=/sbin/init
+    cmdline: console=tty0 console=ttyS0,115200 loglevel=7 ignore_loglevel root=PARTUUID=$rp rootfstype=ext4 rw init=/sbin/init
 LEOF
         log_warn "limine.conf (rootfs direct)"
     fi
