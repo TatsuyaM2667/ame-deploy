@@ -1,46 +1,37 @@
 #!/bin/sh
 copy_rootfs() {
-    log_info "copying rootfs (a few minutes)..."
+    log_info "copying rootfs..."
     mkdir -p "$TARGET"
     for d in bin etc home lib lib64 media opt root sbin srv usr var; do
-        if [ -e "/$d" ]; then
-            log_info "  /$d"
-            cp -a "/$d" "$TARGET/" 2>/dev/null || true
-        fi
+        [ -e "/$d" ] && { log_info "  /$d"; cp -a "/$d" "$TARGET/" 2>/dev/null || true; }
     done
-    mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/run" "$TARGET/tmp" "$TARGET/mnt" "$TARGET/media"
+    mkdir -p "$TARGET"/{proc,sys,dev,run,tmp,mnt,media}
     chmod 1777 "$TARGET/tmp" 2>/dev/null || true
     chmod 0700 "$TARGET/root" 2>/dev/null || true
     log_ok "rootfs copied"
 }
-
 setup_target_skeleton() {
     log_info "target skeleton..."
-    mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/run" "$TARGET/tmp" "$TARGET/mnt" "$TARGET/media" "$TARGET/root" "$TARGET/home"
+    mkdir -p "$TARGET"/{proc,sys,dev,run,tmp,mnt,media,root,home}
     chmod 1777 "$TARGET/tmp" 2>/dev/null || true
     chmod 0700 "$TARGET/root" 2>/dev/null || true
-
     echo "ame" > "$TARGET/etc/hostname"
     cat > "$TARGET/etc/hosts" << 'HEOF'
 127.0.0.1   localhost
 ::1         localhost
 127.0.1.1   ame.localdomain ame
 HEOF
-
     cat > "$TARGET/etc/network/interfaces" << 'IEOF'
 auto lo
 iface lo inet loopback
 IEOF
-
-    # elogind 設定（/run/user 自動作成）
     mkdir -p "$TARGET/etc/elogind"
     cat > "$TARGET/etc/elogind/logind.conf" << 'LEOF'
 [Login]
 KillUserProcesses=no
 RemoveIPC=no
 LEOF
-
-    mkdir -p "$TARGET/etc/runlevels/boot" "$TARGET/etc/runlevels/sysinit" "$TARGET/etc/runlevels/default" "$TARGET/etc/runlevels/shutdown"
+    mkdir -p "$TARGET/etc/runlevels"/{boot,sysinit,default,shutdown}
     for s in bootmisc hostname hwclock modules swap sysctl syslog; do
         [ -e "$TARGET/etc/init.d/$s" ] && ln -sf "/etc/init.d/$s" "$TARGET/etc/runlevels/boot/$s" 2>/dev/null || true
     done
@@ -52,7 +43,6 @@ LEOF
     done
     log_ok "skeleton done"
 }
-
 write_fstab() {
     ep=$(blkid -s PARTUUID -o value "$P1")
     rp=$(blkid -s PARTUUID -o value "$P2")

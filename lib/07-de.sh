@@ -1,52 +1,87 @@
 #!/bin/sh
-# Hyprland / DE インストール v0.6.3 - resilient
 
-# 1つずつ install（失敗してもスキップ）
+# ---- 冪等チェック ----
+hyprland_works() {
+    chroot "$TARGET" /bin/sh -c 'command -v Hyprland >/dev/null 2>&1' || return 1
+    local v
+    v=$(chroot "$TARGET" /bin/sh -c 'Hyprland --version 2>&1 | head -1' 2>&1)
+    echo "$v" | grep -q "Error relocating" && return 1
+    echo "$v" | grep -q "Hyprland" && return 0
+    return 1
+}
+
+# ---- 個別 install（失敗許容） ----
 install_pkgs_optional() {
-    local label="$1"
-    shift
+    local label="$1"; shift
     log_info "  $label"
     local ok=0 skip=0
     for p in "$@"; do
-        if chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $p >/dev/null 2>&1"; then
-            ok=$((ok+1))
-        else
-            log_warn "    skip: $p"
-            skip=$((skip+1))
-        fi
+        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $p >/dev/null 2>&1" && ok=$((ok+1)) || { log_warn "    skip: $p"; skip=$((skip+1)); }
     done
     log_ok "  $label: ok=$ok skip=$skip"
 }
 
-# 1つずつ install（1つでも失敗したらエラー）
-install_pkgs_required() {
-    local label="$1"
-    shift
-    log_info "  $label (required)"
-    local failed=""
-    for p in "$@"; do
-        if chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $p >/dev/null 2>&1"; then
-            :  # ok
+# ---- libstdc++ ABI 修正 ----
+fix_libstdcpp_abi() {
+    log_info "  fixing libstdc++ ABI..."
+    chroot "$TARGET" /bin/sh -c '
+        export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+        apk upgrade --available --force-missing-repositories >/dev/null 2>&1
+        apk add --force-overwrite --force-missing-repositories libstdc++ libgcc gcc >/dev/null 2>&1
+        apk fix hyprland hyprutils hyprlang hyprcursor >/dev/null 2>&1
+    ' || true
+}
+
+# ---- Hyprland install with retry ----
+install_hyprland_with_retry() {
+    local max=3 i=0
+    while [ $i -lt $max ]; do
+        i=$((i+1))
+        log_info "  [attempt $i/$max]"
+
+        # 既に動くなら成功
+        if hyprland_works; then
+            log_ok "  Hyprland works"
+            return 0
+        fi
+
+        # インストール / 修復
+        if chroot "$TARGET" /bin/sh -c 'command -v Hyprland >/dev/null 2>&1'; then
+            log_warn "  binary exists but ABI error - fixing"
+            fix_libstdcpp_abi
+            if hyprland_works; then
+                log_ok "  Hyprland fixed"
+                return 0
+            fi
+            log_warn "  retry full reinstall"
+            chroot "$TARGET" /bin/sh -c '
+                export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+                apk del hyprland hyprutils hyprlang hyprcursor 2>/dev/null
+                apk add --no-cache --force-missing-repositories hyprland hyprutils hyprlang hyprcursor 2>&1 | tail -3
+            ' || true
         else
-            log_warn "    FAILED: $p"
-            failed="$failed $p"
+            chroot "$TARGET" /bin/sh -c '
+                export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+                apk add --no-cache --force-missing-repositories hyprland 2>&1 | tail -5
+            ' || true
         fi
     done
-    if [ -n "$failed" ]; then
-        log_err "  required failed:$failed"
-        return 1
-    fi
-    log_ok "  $label OK"
-    return 0
+    log_err "  Hyprland failed after $max attempts"
+    return 1
 }
 
 # ---- Hyprland 完全インストール ----
 install_hyprland_complete() {
-    log_info "=== Hyprland complete install v0.6.3 ==="
+    # 冪等チェック
+    if state_done "hyprland" && hyprland_works; then
+        log_info "Hyprland already working - skip"
+        return 0
+    fi
+
+    log_info "=== Hyprland install v0.7 ==="
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
 
     # edge repo
-    log_info "[0/7] edge repo"
     [ -f "$TARGET/etc/apk/repositories.stable.bak" ] || \
         cp "$TARGET/etc/apk/repositories" "$TARGET/etc/apk/repositories.stable.bak"
     cat > "$TARGET/etc/apk/repositories" << 'REPOEOF'
@@ -55,50 +90,32 @@ https://dl-cdn.alpinelinux.org/alpine/edge/community
 REPOEOF
     chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
 
-    # ---- 必須: Hyprland 本体 ----
-    log_info "[1/7] Hyprland (required)"
-    if ! install_pkgs_required "hyprland" hyprland; then
-        log_err "Hyprland itself cannot be installed"
-        echo "  Try: chroot $TARGET /bin/sh"
-        echo "       apk add hyprland-git    # if exists"
-        echo "       apk search hyprland"
-        return 1
-    fi
-
-    # ---- 必須: ランタイム ----
-    log_info "[2/7] runtime (required)"
-    install_pkgs_required "runtime" dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc || true
-
-    # ---- 推奨: グラフィックス ----
-    log_info "[3/7] graphics (recommended)"
+    # runtime
+    install_pkgs_optional "runtime" dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc seatd seatd-openrc rtkit
     install_pkgs_optional "graphics" mesa mesa-dri-gallium mesa-vulkan-intel mesa-vulkan-ati
-
-    # ---- 推奨: オーディオ ----
-    log_info "[4/7] audio (recommended)"
     install_pkgs_optional "audio" pipewire pipewire-pulse wireplumber
-
-    # ---- 推奨: ネットワーク ----
-    log_info "[5/7] network (recommended)"
     install_pkgs_optional "network" networkmanager networkmanager-cli networkmanager-tui
-
-    # ---- 推奨: Wayland ツール（1個ずつ） ----
-    log_info "[6/7] hyprland utilities"
     install_pkgs_optional "hypr-tools" \
         xdg-desktop-portal xdg-desktop-portal-gtk \
-        seatd seatd-openrc rtkit \
         waybar foot fuzzel mako swaybg \
         grim slurp wl-clipboard brightnessctl \
         ttf-dejavu font-noto
 
-    # ---- オプション: ポータル（失敗しても続行） ----
-    log_info "[6.5/7] portals (optional - may not exist)"
+    # Hyprland with retry
+    log_info "[5/6] Hyprland ecosystem"
+    if ! install_hyprland_with_retry; then
+        log_err "Hyprland install failed"
+        return 1
+    fi
+
+    # optional portals
+    log_info "[6/6] portals (optional)"
     for portal in xdg-desktop-portal-hyprland xdg-desktop-portal-wlr; do
         chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $portal >/dev/null 2>&1" && \
-            log_ok "    $portal installed" || log_warn "    $portal skipped (ok)"
+            log_ok "  $portal" || log_warn "  $portal skipped"
     done
 
-    # ---- サービス + autostart ----
-    log_info "[7/7] services + autostart"
+    # services
     for s in dbus elogind seatd polkit networkmanager; do
         target_rc_add "$s" default 2>/dev/null || true
     done
@@ -106,25 +123,21 @@ REPOEOF
     target_rc_add elogind boot 2>/dev/null || true
 
     install_runtime_dir_service
+    setup_hyprland_autostart_v7
 
-    setup_hyprland_autostart_v6
-
-    # ---- 検証 ----
-    log_info "final verification"
-    if chroot "$TARGET" /bin/sh -c 'command -v Hyprland >/dev/null 2>&1'; then
-        hv=$(chroot "$TARGET" /bin/sh -c 'Hyprland --version 2>&1 | head -1' || echo "?")
-        log_ok "Hyprland installed: $hv"
-    else
-        log_err "Hyprland binary NOT FOUND in target"
-        return 1
+    # 最終検証
+    if hyprland_works; then
+        local v=$(chroot "$TARGET" /bin/sh -c 'Hyprland --version 2>&1 | head -1')
+        log_ok "Hyprland: $v"
+        state_mark "hyprland"
+        return 0
     fi
-
-    log_ok "Hyprland complete"
+    log_err "final verification failed"
+    return 1
 }
 
-setup_hyprland_autostart_v6() {
+setup_hyprland_autostart_v7() {
     cat > "$TARGET/etc/profile.d/ame-autostart.sh" << 'AEOF'
-# ame-deploy v0.6.3: Hyprland autostart (bulletproof)
 if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
     UID_NUM="$(id -u)"
     RDIR="/run/user/$UID_NUM"
@@ -139,64 +152,50 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/
         chmod 0700 "$RDIR" 2>/dev/null
         export XDG_RUNTIME_DIR="$RDIR"
         if command -v start-hyprland >/dev/null 2>&1; then
-            start-hyprland || { echo "=== start-hyprland failed ==="; echo "Log: cat /tmp/hypr/*/hyprland.log 2>/dev/null | tail -30"; echo "Dropping to shell."; }
+            start-hyprland || { echo "=== failed, shell ==="; echo "Log: cat /tmp/hypr/*/hyprland.log 2>/dev/null | tail -30"; }
         elif command -v Hyprland >/dev/null 2>&1; then
-            Hyprland || { echo "=== Hyprland failed ==="; echo "Log: cat /tmp/hypr/*/hyprland.log 2>/dev/null | tail -30"; echo "Dropping to shell."; }
-        else
-            echo "=== Hyprland binary not found ==="
+            Hyprland || { echo "=== failed, shell ==="; echo "Log: cat /tmp/hypr/*/hyprland.log 2>/dev/null | tail -30"; }
         fi
-    else
-        echo "=== /run/user/$UID_NUM unavailable ==="
     fi
 fi
 AEOF
     chmod +x "$TARGET/etc/profile.d/ame-autostart.sh"
-    log_ok "safe autostart installed"
+    log_ok "autostart installed"
 }
 
-# ---- その他 DE ----
+# ---- 他 DE ----
 install_de_profile() {
     profile="$1"
     lock="${2:-auto}"
     log_info "Desktop env: $profile (lock=$lock)"
 
-    if [ "$profile" = "04-hyprland" ]; then
-        install_hyprland_complete
-        return $?
-    fi
+    case "$profile" in
+        04-hyprland) install_hyprland_complete; return $? ;;
+        00-minimal) log_ok "minimal"; state_mark "de"; return 0 ;;
+    esac
+
+    # その他は簡易
+    local pkgs="" services="" cmd=""
+    case "$profile" in
+        05-sway) pkgs="sway swaybg waybar foot fuzzel mako seatd seatd-openrc xdg-desktop-portal-wlr grim slurp wl-clipboard brightnessctl"; services="dbus elogind seatd"; cmd="sway" ;;
+        01-river) pkgs="river waybar foot fuzzel mako swaybg xdg-desktop-portal xdg-desktop-portal-wlr grim slurp wl-clipboard brightnessctl"; services="dbus elogind seatd"; cmd="river" ;;
+        02-kde) pkgs="plasma-desktop plasma-workspace plasma-nm plasma-pa konsole dolphin kate sddm xdg-desktop-portal-kde"; services="dbus elogind"; cmd="" ;;
+        03-gnome) pkgs="gnome gnome-shell gnome-session gnome-terminal nautilus gnome-control-center gnome-tweaks xdg-desktop-portal-gnome"; services="dbus elogind"; cmd="" ;;
+        *) log_err "unknown"; return 1 ;;
+    esac
+
+    install_pkgs_optional "$profile" $pkgs
+    install_pkgs_optional "runtime" dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc pipewire pipewire-pulse wireplumber networkmanager
+    for s in $services networkmanager; do target_rc_add "$s" default 2>/dev/null || true; done
+    install_runtime_dir_service
+    [ -n "$cmd" ] && setup_generic_autostart "$cmd"
 
     case "$profile" in
-        00-minimal) log_ok "minimal"; return 0 ;;
-        05-sway)
-            install_pkgs_required "sway" sway || true
-            install_pkgs_optional "sway-tools" swaybg waybar foot fuzzel mako seatd seatd-openrc xdg-desktop-portal-wlr grim slurp wl-clipboard brightnessctl
-            install_pkgs_optional "runtime" dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc pipewire pipewire-pulse wireplumber networkmanager
-            for s in dbus elogind seatd polkit networkmanager; do target_rc_add "$s" default 2>/dev/null || true; done
-            install_runtime_dir_service
-            setup_generic_autostart "sway"
-            return 0 ;;
-        01-river)
-            install_pkgs_required "river" river || true
-            install_pkgs_optional "river-tools" waybar foot fuzzel mako swaybg xdg-desktop-portal xdg-desktop-portal-wlr grim slurp wl-clipboard brightnessctl
-            install_pkgs_optional "runtime" seatd seatd-openrc dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc pipewire pipewire-pulse wireplumber networkmanager
-            for s in dbus elogind seatd polkit networkmanager; do target_rc_add "$s" default 2>/dev/null || true; done
-            install_runtime_dir_service
-            setup_generic_autostart "river"
-            return 0 ;;
-        02-kde)
-            install_pkgs_optional "kde" plasma-desktop plasma-workspace plasma-nm plasma-pa konsole dolphin kate sddm xdg-desktop-portal-kde
-            install_pkgs_optional "runtime" dbus elogind polkit pipewire pipewire-pulse wireplumber networkmanager
-            for s in dbus elogind polkit networkmanager; do target_rc_add "$s" default 2>/dev/null || true; done
-            install_display_manager sddm
-            return 0 ;;
-        03-gnome)
-            install_pkgs_optional "gnome" gnome gnome-shell gnome-session gnome-terminal nautilus gnome-control-center gnome-tweaks xdg-desktop-portal-gnome
-            install_pkgs_optional "runtime" dbus elogind polkit pipewire pipewire-pulse wireplumber networkmanager
-            for s in dbus elogind polkit networkmanager; do target_rc_add "$s" default 2>/dev/null || true; done
-            install_display_manager gdm
-            return 0 ;;
-        *) log_err "unknown: $profile"; return 1 ;;
+        02-kde) install_display_manager sddm ;;
+        03-gnome) install_display_manager gdm ;;
     esac
+    state_mark "de"
+    log_ok "$profile done"
 }
 
 setup_generic_autostart() {
@@ -215,37 +214,30 @@ if [ -z "\$WAYLAND_DISPLAY" ] && [ -z "\$DISPLAY" ] && [ "\$(tty 2>/dev/null)" =
     if [ -d "\$RDIR" ]; then
         export XDG_RUNTIME_DIR="\$RDIR"
         chmod 0700 "\$RDIR" 2>/dev/null
-        if command -v $cmd >/dev/null 2>&1; then
-            $cmd || echo "=== $cmd failed, shell ==="
-        fi
+        command -v $cmd >/dev/null 2>&1 && $cmd
     fi
 fi
 EOF
     chmod +x "$TARGET/etc/profile.d/ame-autostart.sh"
-    log_ok "autostart: $cmd"
 }
 
 install_display_manager() {
-    lock="$1"
-    case "$lock" in
-        sddm) chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories sddm >/dev/null 2>&1'; target_rc_add sddm default 2>/dev/null || true; log_ok "sddm" ;;
+    case "$1" in
+        sddm) chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories sddm >/dev/null 2>&1'; target_rc_add sddm default 2>/dev/null || true ;;
         gdm)
             chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories gdm >/dev/null 2>&1' || true
             if [ ! -f "$TARGET/etc/init.d/gdm" ]; then
                 cat > "$TARGET/etc/init.d/gdm" << 'GDMEOF'
 #!/sbin/openrc-run
 name="gdm"
-description="GNOME Display Manager"
+description="GDM"
 command="/usr/sbin/gdm"
 command_background="yes"
 pidfile="/run/gdm.pid"
 depend() { need dbus elogind; after localmount; }
-start_pre() { checkpath --directory --mode 0755 /run/gdm; }
 GDMEOF
                 chmod +x "$TARGET/etc/init.d/gdm"
             fi
-            target_rc_add gdm default 2>/dev/null || true
-            log_ok "gdm" ;;
-        greetd) chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories greetd greetd-tuigreet >/dev/null 2>&1' || true; target_rc_add greetd default 2>/dev/null || true; log_ok "greetd" ;;
+            target_rc_add gdm default 2>/dev/null || true ;;
     esac
 }

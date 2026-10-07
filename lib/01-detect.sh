@@ -2,7 +2,6 @@
 detect_cpu()       { grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown; }
 detect_cpu_cores() { nproc 2>/dev/null || echo 1; }
 detect_ram_mb()    { awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo; }
-
 detect_gpu() {
     if command -v lspci >/dev/null 2>&1; then
         local l; l=$(lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | head -1)
@@ -22,7 +21,6 @@ detect_gpu() {
     done
     echo unknown
 }
-
 detect_wifi() {
     local has=0
     for w in /sys/class/net/*/wireless; do [ -e "$w" ] && has=1 && break; done
@@ -38,7 +36,6 @@ detect_wifi() {
     fi
     echo unknown
 }
-
 detect_eth() {
     for d in /sys/class/net/e*; do
         [ -e "$d" ] || continue
@@ -49,7 +46,6 @@ detect_eth() {
     done
     echo no
 }
-
 show_hw_summary() {
     echo "+--------------------------------------------------+"
     echo "|  Hardware detection                              |"

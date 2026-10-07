@@ -1,30 +1,19 @@
 #!/bin/sh
-# ame-deploy v0.4 - 共通ユーティリティ
-
-# --- グローバル変数 ---
-DEPLOY_VER="0.4"
+DEPLOY_VER="0.7"
 : "${TARGET:=}"
 : "${ESP:=}"
 : "${DEV:=}"
 : "${P1:=}"
 : "${P2:=}"
 
-# --- ログ ---
 log_info() { printf "[INFO] %s\n" "$*"; }
 log_ok()   { printf "[ OK ] %s\n" "$*"; }
 log_warn() { printf "[WARN] %s\n" "$*" >&2; }
 log_err()  { printf "[ERR ] %s\n" "$*" >&2; }
 die()      { log_err "$*"; exit 1; }
 
-# --- 共通ヘルパ ---
-pause() {
-    printf "\n  Enter > "
-    read -r _
-}
-
-require_root() {
-    [ "$(id -u)" = "0" ] || die "must run as root"
-}
+pause() { printf "\n  Enter > "; read -r _; }
+require_root() { [ "$(id -u)" = "0" ] || die "must run as root"; }
 
 require_disk() {
     [ -n "$DEV" ] || die "disk not selected. Run [2] first"
@@ -33,31 +22,39 @@ require_disk() {
     mountpoint -q "$ESP" 2>/dev/null    || die "$ESP not mounted"
 }
 
-require_file() {
-    [ -f "$1" ] || die "missing file: $1"
+require_file() { [ -f "$1" ] || die "missing file: $1"; }
+
+# ---- state 管理（target 側に保存 → 再起動後も保持） ----
+STATE_DIR=""   # install 中に $TARGET/var/lib/ame-deploy/state を指す
+
+state_init() {
+    [ -n "$TARGET" ] || return 1
+    STATE_DIR="$TARGET/var/lib/ame-deploy/state"
+    mkdir -p "$STATE_DIR"
 }
 
-# 安全な /run/user/$UID 取得（3段フォールバック）
-safe_runtime_dir() {
-    uid="${1:-$(id -u)}"
-    for d in "/run/user/$uid" "/tmp/xdg-$uid"; do
-        if mkdir -p "$d" 2>/dev/null; then
-            chmod 0700 "$d" 2>/dev/null || true
-            echo "$d"
-            return 0
-        fi
-    done
-    echo "/tmp"
+state_mark() {
+    [ -n "$STATE_DIR" ] || state_init || return 1
+    touch "$STATE_DIR/$1"
 }
 
-# サービスを確実に起動（timeout付き）
-start_service() {
-    svc="$1"
-    if ! rc-service "$svc" status >/dev/null 2>&1; then
-        rc-service "$svc" start >/dev/null 2>&1 || true
+state_done() {
+    [ -n "$STATE_DIR" ] || state_init || return 1
+    [ -f "$STATE_DIR/$1" ]
+}
+
+state_clear() {
+    [ -n "$STATE_DIR" ] || return 0
+    rm -rf "$STATE_DIR"
+}
+
+state_list() {
+    [ -n "$STATE_DIR" ] || return 0
+    if [ -d "$STATE_DIR" ]; then
+        for f in "$STATE_DIR"/*; do
+            [ -f "$f" ] && echo "  * $(basename $f)"
+        done
     fi
-    sleep 0.5
-    rc-service "$svc" status >/dev/null 2>&1
 }
 
 # target 内でサービス有効化
@@ -65,4 +62,9 @@ target_rc_add() {
     svc="$1"
     level="${2:-default}"
     chroot "$TARGET" /bin/sh -c "rc-update add $svc $level 2>/dev/null" || true
+}
+
+# target 内で apk add（失敗時 tail 出力）
+target_apk_add() {
+    chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $* 2>&1" | tail -5
 }
