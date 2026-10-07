@@ -1,5 +1,5 @@
 #!/bin/sh
-DEPLOY_VER="6.1.0"
+DEPLOY_VER="6.0.0"
 : "${TARGET:=}"; : "${ESP:=}"; : "${DEV:=}"; : "${P1:=}"; : "${P2:=}"; : "${STATE_DIR:=}"
 
 log_info() { printf "[INFO] %s\n" "$*"; }

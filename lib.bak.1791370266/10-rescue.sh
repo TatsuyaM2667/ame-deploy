@@ -140,7 +140,7 @@ NMEOF
 
 rescue_installed_system() {
     log_info "=========================================="
-    log_info " Full Rescue v6.1"
+    log_info " Full Rescue v6.0"
     log_info "=========================================="
     auto_mount_target || { log_err "no install found"; return 1; }
     log_ok "target: $TARGET"
@@ -182,7 +182,7 @@ MK
     ensure_user_homes
     setup_autostart_sway
     log_ok "=========================================="
-    log_ok " Rescue v6.1 COMPLETE"
+    log_ok " Rescue v6.0 COMPLETE"
     log_ok "=========================================="
     log_info "Kernel: $KVER"
     log_info "WiFi: NetworkManager + wpa_supplicant + modules"

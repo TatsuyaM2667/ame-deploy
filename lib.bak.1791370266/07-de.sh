@@ -14,19 +14,8 @@ install_common() {
     install_runtime_dir_service
 }
 
-# ---- ビルドツールの自動インストール ----
-ensure_build_tools() {
-    log_info "  ensuring build tools..."
-    _mount_chroot_fs
-    for pkg in git rust cargo zig; do
-        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $pkg >/dev/null 2>&1" && \
-            log_ok "    $pkg" || log_warn "    skip: $pkg"
-    done
-    _umount_chroot_fs
-}
-
 # ============================================================
-# MARSWM (Rust, X11) - git clone + cargo build
+# MARSWM (Rust, X11)
 # ============================================================
 install_marswm_complete() {
     if state_done "de-marswm" && chroot "$TARGET" /bin/sh -c 'command -v marswm >/dev/null 2>&1'; then
@@ -35,15 +24,11 @@ install_marswm_complete() {
     log_info "=== MARSWM install (source) ==="
     enable_edge
     install_common
-    ensure_build_tools
-    pkgs_optional "marswm-deps" libx11-dev libxft-dev libxinerama-dev libxrandr-dev
-    log_info "  cloning MARSWM..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp && rm -rf marswm && git clone --depth 1 https://github.com/koekeishiya/marswm 2>&1 | tail -3'
-    log_info "  building MARSWM..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp/marswm && cargo build --release 2>&1 | tail -10'
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cp /tmp/marswm/target/release/marswm /usr/local/bin/ 2>/dev/null'
+    pkgs_optional "marswm-deps" rust cargo libx11-dev libxft-dev libxinerama-dev libxrandr-dev
+    log_info "  building MARSWM from source..."
+    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cargo install --root=/usr/local/ marswm marsbar mars-relay 2>&1 | tail -10'
     if ! chroot "$TARGET" /bin/sh -c 'command -v marswm >/dev/null 2>&1'; then
-        log_warn "marswm binary not found - skipping"
+        log_warn "MARSWM binary not found - skipping"
         state_mark "de-marswm"
         return 0
     fi
@@ -61,19 +46,16 @@ install_orilla_complete() {
     log_info "=== orilla install (source) ==="
     enable_edge
     install_common
-    ensure_build_tools
     pkgs_optional "river" river river-classic
-    pkgs_optional "orilla-deps" wayland-dev wayland-protocols-dev
-    log_info "  cloning orilla..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp && rm -rf orilla && git clone --depth 1 https://git.sr.ht/~hokiegeek/orilla 2>&1 | tail -3'
-    log_info "  building orilla..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp/orilla && cargo build --release 2>&1 | tail -10'
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cp /tmp/orilla/target/release/orilla /usr/local/bin/ 2>/dev/null'
+    pkgs_optional "orilla-deps" rust cargo cargo-generate wayland-dev wayland-protocols-dev
+    log_info "  building orilla from source..."
+    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp && cargo generate --git https://git.sr.ht/~hokiegeek/orilla.git --subfolder template --name my-orilla --force 2>&1 | tail -5 && cd my-orilla && cargo build --release 2>&1 | tail -5 && cp target/release/my-orilla /usr/local/bin/orilla 2>/dev/null || true'
     if ! chroot "$TARGET" /bin/sh -c 'command -v orilla >/dev/null 2>&1'; then
         log_warn "orilla binary not found - skipping"
         state_mark "de-orilla"
         return 0
     fi
+    # river の init に orilla を自動起動設定
     mkdir -p "$TARGET/root/.config/river"
     cat > "$TARGET/root/.config/river/init" << 'RC'
 #!/bin/sh
@@ -85,7 +67,7 @@ RC
 }
 
 # ============================================================
-# Niri (Rust, scrollable tiling) - Alpine package
+# Niri (Rust, scrollable tiling)
 # ============================================================
 install_niri_complete() {
     if state_done "de-niri" && chroot "$TARGET" /bin/sh -c 'command -v niri >/dev/null 2>&1'; then
@@ -102,31 +84,6 @@ install_niri_complete() {
     setup_autostart_niri
     state_mark "de-niri"
     log_ok "Niri complete"
-}
-
-# ============================================================
-# RedIWM (Zig) - git clone + zig build
-# ============================================================
-install_rediwm_complete() {
-    if state_done "de-rediwm" && chroot "$TARGET" /bin/sh -c 'command -v rediwm >/dev/null 2>&1'; then
-        log_info "RedIWM already installed"; return 0
-    fi
-    log_info "=== RedIWM install (source) ==="
-    enable_edge
-    install_common
-    ensure_build_tools
-    pkgs_optional "rediwm-deps" wlroots0.20-dev wayland-dev wayland-protocols xkbcommon-dev pixman-dev freetype-dev harfbuzz-dev fontconfig-dev librsvg-dev gdk-pixbuf-dev pango-dev cairo-dev libinput-dev pam-dev libpulse-dev libpipewire-dev poppler-glib-dev libseccomp-dev libjpeg-turbo-dev libpng-dev
-    log_info "  cloning RedIWM..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp && rm -rf rediwm && git clone --depth 1 https://github.com/oxydizer/rediwm.git 2>&1 | tail -3'
-    log_info "  building RedIWM..."
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp/rediwm && zig build -Doptimize=ReleaseSafe 2>&1 | tail -10'
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cp /tmp/rediwm/zig-out/bin/rediwm /usr/local/bin/ 2>/dev/null; cp /tmp/rediwm/zig-out/bin/rediwm-dm /usr/local/bin/ 2>/dev/null'
-    if ! chroot "$TARGET" /bin/sh -c 'command -v rediwm >/dev/null 2>&1'; then
-        log_err "rediwm binary not found"; return 1
-    fi
-    setup_autostart_rediwm
-    state_mark "de-rediwm"
-    log_ok "RedIWM complete"
 }
 
 # ============================================================
@@ -212,6 +169,21 @@ install_kde_complete() {
     rm -f "$TARGET/etc/profile.d/ame-autostart.sh" 2>/dev/null || true
     state_mark "de-kde"
     log_ok "KDE complete (SDDM)"
+}
+
+install_rediwm_complete() {
+    log_info "=== RedIWM install (source) ==="
+    enable_edge
+    install_common
+    pkgs_optional "rediwm-deps" zig wlroots0.20-dev wayland-dev wayland-protocols xkbcommon-dev pixman-dev freetype-dev harfbuzz-dev fontconfig-dev librsvg-dev gdk-pixbuf-dev pango-dev cairo-dev libinput-dev pam-dev libpulse-dev libpipewire-dev poppler-glib-dev libseccomp-dev libjpeg-turbo-dev libpng-dev
+    log_info "  building RedIWM from source..."
+    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; cd /tmp && git clone --depth 1 https://github.com/oxydizer/rediwm.git 2>&1 | tail -2 && cd rediwm && zig build -Doptimize=ReleaseSafe 2>&1 | tail -5 && cp zig-out/bin/rediwm /usr/local/bin/ && cp zig-out/bin/rediwm-dm /usr/local/bin/ 2>/dev/null || true'
+    if ! chroot "$TARGET" /bin/sh -c 'command -v rediwm >/dev/null 2>&1'; then
+        log_err "rediwm binary not found"; return 1
+    fi
+    setup_autostart_rediwm
+    state_mark "de-rediwm"
+    log_ok "RedIWM complete"
 }
 
 install_miracle_wm_complete() {
