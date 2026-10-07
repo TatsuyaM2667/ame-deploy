@@ -157,7 +157,7 @@ step_all() {
     # kernel (linux-lts default)
     KPKG="linux-lts"; KIMG="vmlinuz-lts"; KINITRD="initramfs-lts"
     log_info "installing $KPKG (default)"
-    select_and_install_kernel <<< "1" || return
+    echo "1" | select_and_install_kernel || return
 
     install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
 
