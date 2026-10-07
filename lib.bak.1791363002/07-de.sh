@@ -1,4 +1,5 @@
 #!/bin/sh
+# ---- 個別 install ----
 pkgs_optional() {
     label="$1"; shift
     log_info "  $label"
@@ -8,16 +9,17 @@ pkgs_optional() {
     done
     log_ok "  $label: ok=$ok"
 }
+
 enable_edge() {
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
     [ -f "$TARGET/etc/apk/repositories.stable.bak" ] || cp "$TARGET/etc/apk/repositories" "$TARGET/etc/apk/repositories.stable.bak" 2>/dev/null || true
     cat > "$TARGET/etc/apk/repositories" << 'R1'
 https://dl-cdn.alpinelinux.org/alpine/edge/main
 https://dl-cdn.alpinelinux.org/alpine/edge/community
-@testing https://dl-cdn.alpinelinux.org/alpine/edge/testing
 R1
     chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
 }
+
 install_common() {
     pkgs_optional "runtime" dbus dbus-openrc elogind elogind-openrc polkit polkit-openrc
     pkgs_optional "audio" pipewire pipewire-pulse wireplumber
@@ -34,49 +36,14 @@ install_common() {
     target_rc_add elogind boot 2>/dev/null || true
     install_runtime_dir_service
 }
-# ---------- River 完全インストール ----------
-install_river_complete() {
-    if state_done "de-river"; then
-        log_info "River already installed"; return 0
-    fi
-    log_info "=== River install v2.0.3 (river-classic + rivercarro + river-bedload) ==="
-    enable_edge
-    install_common
-    # river-classic 本体（river, riverctl, rivertile を含む）
-    log_info "[1/3] river-classic"
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories river-classic 2>&1 | tail -3' || true
-    # rivercarro (layout generator)
-    log_info "[2/3] rivercarro"
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories rivercarro@testing 2>&1 | tail -3' || true
-    # river-bedload (status info to stdout)
-    log_info "[3/3] river-bedload"
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories river-bedload@testing 2>&1 | tail -3' || true
-    # その他便利ツール
-    pkgs_optional "river-tools" foot waybar fuzzel mako swaybg xdg-desktop-portal-wlr xdg-utils
-    # 検証
-    if ! chroot "$TARGET" /bin/sh -c 'command -v river >/dev/null 2>&1'; then
-        log_err "river binary not found after install"
-        return 1
-    fi
-    # サンプル init をコピー
-    local sample_init="/usr/share/doc/river/examples/init"
-    local sample_init_alt="/usr/share/river/example/init"
-    local src_sample=""
-    if [ -f "$TARGET$sample_init" ]; then src_sample="$sample_init"
-    elif [ -f "$TARGET$sample_init_alt" ]; then src_sample="$sample_init_alt"
-    fi
-    # ユーザー用の home を準備（存在しない場合）
-    mkdir -p "$TARGET/home/ame" "$TARGET/home/tatsuya" "$TARGET/root"
-    local users="ame tatsuya root"
-    for u in $users; do
-        local h="/home/$u"
-        [ "$u" = "root" ] && h="/root"
-        mkdir -p "$TARGET$h/.config/river"
-        if [ -n "$src_sample" ] && [ -f "$TARGET$src_sample" ]; then
-            cp "$TARGET$src_sample" "$TARGET$h/.config/river/init"
-        else
-            # フォールバック: 基本的な init を手動作成
-            cat > "$TARGET$h/.config/river/init" << 'RC'
+
+river_config_for() {
+    uname="$1"
+    [ -z "$uname" ] && uname="ame"
+    home="/home/$uname"
+    [ "$uname" = "root" ] && home="/root"
+    mkdir -p "$TARGET$home/.config/river"
+    cat > "$TARGET$home/.config/river/init" << 'RC'
 #!/bin/sh
 export XDG_CURRENT_DESKTOP=river
 export XDG_SESSION_TYPE=wayland
@@ -94,27 +61,31 @@ riverctl map normal Super+Shift K swap previous
 riverctl map normal Super Space toggle-float
 riverctl map normal Super F toggle-fullscreen
 riverctl modifier Super
-# rivercarro があれば利用
-if command -v rivercarro >/dev/null 2>&1; then
-    riverctl default-layout rivercarro
-    rivercarro -outer-gaps 6 -inner-gaps 6 2>/dev/null &
-else
-    riverctl default-layout rivertile
-    rivertile -view-padding 6 -outer-padding 6 2>/dev/null &
-fi
 RC
-        fi
-        chmod +x "$TARGET$h/.config/river/init"
-    done
-    # 所有者を設定
-    uid_ame=$(chroot "$TARGET" /bin/sh -c "id -u ame 2>/dev/null" || echo 1000)
-    chown -R "$uid_ame:$uid_ame" "$TARGET/home/ame" 2>/dev/null || true
-    chown -R 1001:1001 "$TARGET/home/tatsuya" 2>/dev/null || true
-    chown -R 0:0 "$TARGET/root" 2>/dev/null || true
+    chmod +x "$TARGET$home/.config/river/init"
+    uid=$(chroot "$TARGET" /bin/sh -c "id -u $uname 2>/dev/null" || echo 1000)
+    chroot "$TARGET" /bin/sh -c "chown -R $uid:$uid $home/.config 2>/dev/null" || true
+}
+
+install_river_complete() {
+    if state_done "de-river" && chroot "$TARGET" /bin/sh -c 'command -v river >/dev/null 2>&1'; then
+        log_info "River already installed"; return 0
+    fi
+    log_info "=== River install ==="
+    enable_edge
+    install_common
+    pkgs_optional "river" river waybar foot fuzzel mako swaybg xdg-desktop-portal-wlr xdg-utils
+    if ! chroot "$TARGET" /bin/sh -c 'command -v river >/dev/null 2>&1'; then
+        log_err "river binary not found"; return 1
+    fi
+    river_config_for "tatsuya"
+    river_config_for "ame"
+    river_config_for "root"
     setup_autostart
     state_mark "de-river"
-    log_ok "River complete"
+    log_ok "River complete (Super+Return=foot, Super+D=fuzzel, Super+Q=close, Super+Shift+E=exit)"
 }
+
 install_sway_complete() {
     log_info "=== Sway install ==="
     enable_edge
@@ -124,6 +95,7 @@ install_sway_complete() {
     state_mark "de-sway"
     log_ok "Sway complete"
 }
+
 install_gnome_complete() {
     log_info "=== GNOME install ==="
     enable_edge
@@ -148,6 +120,7 @@ G
     state_mark "de-gnome"
     log_ok "GNOME complete (login via GDM)"
 }
+
 install_kde_complete() {
     log_info "=== KDE Plasma install ==="
     enable_edge
@@ -159,6 +132,7 @@ install_kde_complete() {
     state_mark "de-kde"
     log_ok "KDE complete (login via SDDM)"
 }
+
 install_hyprland_complete() {
     log_info "=== Hyprland install (best-effort) ==="
     enable_edge
@@ -184,6 +158,7 @@ install_hyprland_complete() {
     state_mark "de-hyprland"
     return 0
 }
+
 install_de_profile() {
     profile="$1"
     log_info "Desktop env: $profile"
@@ -197,6 +172,7 @@ install_de_profile() {
         *) log_err "unknown: $profile"; return 1 ;;
     esac
 }
+
 setup_autostart() {
     cat > "$TARGET/etc/profile.d/ame-autostart.sh" << 'AUTO'
 if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
@@ -211,6 +187,7 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/
     [ -d "$RDIR" ] || mkdir -p "$RDIR" 2>/dev/null
     chmod 0700 "$RDIR" 2>/dev/null
     export XDG_RUNTIME_DIR="$RDIR"
+
     if command -v river >/dev/null 2>&1; then
         mkdir -p "$HOME/.config/river" 2>/dev/null
         if [ ! -f "$HOME/.config/river/init" ]; then

@@ -9,7 +9,7 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v2.0              |
+|   Ame Linux Installer (ame-deploy) v2.0.3            |
 |   River default / 4-DE reliable / rescue              |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
@@ -18,7 +18,7 @@ banner() {
 |   [4] Install kernel                                 |
 |   [5] Install firmware / drivers                     |
 |   [6] Select desktop environment                     |
-|   [7] Create user (home + river config auto)         |
+|   [7] Create user                                    |
 |   [8] Install bootloader                             |
 |   [9] Verify install                                 |
 |                                                      |
@@ -99,7 +99,6 @@ step_all() {
     [ "$c" = "y" ] || return
     show_hw_summary
     state_init
-
     if ! state_done "rootfs"; then
         select_disk || return
         umount_disk
@@ -110,13 +109,11 @@ step_all() {
         copy_rootfs; setup_target_skeleton; write_fstab
         state_mark "rootfs"
     fi
-
     state_done "kernel" || { echo "1" | { read _; select_and_install_kernel; }; }
     state_done "firmware" || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
     state_done "de-river" || install_de_profile "01-river"
     state_done "user" || create_user
     state_done "bootloader" || install_bootloader_complete "$DEPLOY_DIR/boot"
-
     cleanup_deploy
     sync
     verify_target
