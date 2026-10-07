@@ -9,13 +9,13 @@ banner() {
     clear
     cat << 'B'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v8.0.0            |
-|   WiFi+GPU complete / Sway version-compat            |
+|   Ame Linux Installer (ame-deploy) v9.0.0            |
+|   WiFi auto-init + DRM card0 fix + Sway wrapper      |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
-|   [4] Install kernel (modules+fw verified)           |
+|   [4] Install kernel                                 |
 |   [5] Install firmware / drivers                     |
 |   [6] Select desktop environment                     |
 |   [7] Create user                                    |
@@ -60,7 +60,7 @@ step6() {
         select_and_install_kernel || { pause; return; }
     fi
     echo "  Profile:"
-    echo "    [1] Sway           (recommended, version-compat)"
+    echo "    [1] Sway           (recommended, DRM wrapper)"
     echo "    [2] Hyprland"
     echo "    [3] River          (river-classic)"
     echo "    [4] GNOME"

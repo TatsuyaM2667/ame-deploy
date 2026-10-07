@@ -55,7 +55,7 @@ serial: yes
     module_path: boot():/EFI/BOOT/initramfs.cpio.gz
     cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait i915.enable_guc=3
 L1
-        log_ok "limine.conf (initramfs)"
+        log_ok "limine.conf (initramfs, root=$RD)"
     else
         cat > "$ESP/EFI/BOOT/limine.conf" << L2
 timeout: 5
@@ -66,7 +66,7 @@ serial: yes
     kernel_path: boot():/EFI/BOOT/vmlinuz-ame
     cmdline: console=tty0 loglevel=4 root=$RD rootfstype=ext4 rw rootwait init=/sbin/init i915.enable_guc=3
 L2
-        log_warn "limine.conf (direct)"
+        log_warn "limine.conf (direct, root=$RD)"
     fi
 }
 register_uefi() {

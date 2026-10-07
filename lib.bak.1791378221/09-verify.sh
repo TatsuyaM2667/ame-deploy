@@ -17,8 +17,6 @@ verify_target() {
     check /etc/modules
     check /etc/modprobe.d/ame-i915.conf
     check /etc/environment.d/10-wlroots.conf
-    check /etc/init.d/ame-wifi-init
-    check /etc/init.d/ame-drm-fix
 
     KVER=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
     if [ -n "$KVER" ]; then
@@ -29,6 +27,7 @@ verify_target() {
 
     ls "$TARGET/lib/firmware/i915/"* 2>/dev/null | grep -qiE 'guc|huc' && { echo "  [OK]  i915 firmware"; ok=$((ok+1)); } || { echo "  [NG]  i915 firmware"; bad=$((bad+1)); }
     ls "$TARGET/lib/firmware/rtw88/"* 2>/dev/null | grep -q . && { echo "  [OK]  rtw88 firmware"; ok=$((ok+1)); } || { echo "  [NG]  rtw88 firmware"; bad=$((bad+1)); }
+    ls "$TARGET/lib/firmware/rtw89/"* 2>/dev/null | grep -q . && { echo "  [OK]  rtw89 firmware"; ok=$((ok+1)); } || true
 
     echo "  OK=$ok NG=$bad"
     echo "=== ESP ==="

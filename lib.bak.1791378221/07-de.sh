@@ -12,117 +12,11 @@ install_common() {
         target_rc_add "$s" boot 2>/dev/null || true
     done
     install_runtime_dir_service
-    install_wifi_init_service
-    install_drm_fix_service
 }
 
 # ============================================================
-# WiFi 初期化サービス（boot 時に reg domain + rfkill unblock + scan 準備）
+# Sway 専用: バージョン検出 + 互換起動スクリプト配置
 # ============================================================
-install_wifi_init_service() {
-    state_done "wifi-init" && return 0
-    mkdir -p "$TARGET/etc/init.d"
-    cat > "$TARGET/etc/init.d/ame-wifi-init" << 'SVC'
-#!/sbin/openrc-run
-name="ame-wifi-init"
-description="WiFi regulatory + rfkill unblock + module load"
-depend() { need localmount; after networkmanager; }
-start() {
-    ebegin "WiFi init (reg domain + rfkill + modules)"
-    # WiFi モジュール強制ロード（既に load 済みなら no-op）
-    for m in rtw88_core rtw88_pci rtw88_8821ce rtw88_8821cu rtw88_8822be rtw88_8822ce \
-             rtw89_core rtw89_pci rtw89_8852ae rtw89_8852be rtw89_8852ce \
-             iwlwifi mt7921e ath10k_pci ath11k_pci brcmfmac; do
-        modprobe "$m" 2>/dev/null || true
-    done
-    sleep 1
-
-    # rfkill 解除
-    if command -v rfkill >/dev/null 2>&1; then
-        rfkill unblock all 2>/dev/null || true
-    fi
-
-    # regulatory domain 日本に設定
-    if command -v iw >/dev/null 2>&1; then
-        iw reg set JP 2>/dev/null || true
-    fi
-
-    # wlan0 を up
-    for iface in $(ls /sys/class/net/ 2>/dev/null | grep -E '^wl'); do
-        ip link set "$iface" up 2>/dev/null || true
-    done
-
-    # NetworkManager を再起動して WiFi スキャン反映
-    if rc-service networkmanager status >/dev/null 2>&1; then
-        rc-service networkmanager restart 2>/dev/null || true
-    fi
-
-    eend 0
-}
-SVC
-    chmod +x "$TARGET/etc/init.d/ame-wifi-init"
-    for lvl in default boot; do
-        mkdir -p "$TARGET/etc/runlevels/$lvl"
-        ln -sf /etc/init.d/ame-wifi-init "$TARGET/etc/runlevels/$lvl/ame-wifi-init" 2>/dev/null || true
-    done
-
-    # regulatory domain を永続化
-    mkdir -p "$TARGET/etc/conf.d"
-    cat > "$TARGET/etc/conf.d/wireless-regdom" << 'REG'
-WIRELESS_REGDOM="JP"
-REG
-
-    state_mark "wifi-init"
-    log_ok "wifi-init service installed"
-}
-
-# ============================================================
-# DRM card0/card1 問題解決サービス（boot 時 card0 symlink）
-# ============================================================
-install_drm_fix_service() {
-    state_done "drm-fix" && return 0
-    mkdir -p "$TARGET/etc/init.d"
-    cat > "$TARGET/etc/init.d/ame-drm-fix" << 'SVC'
-#!/sbin/openrc-run
-name="ame-drm-fix"
-description="Ensure /dev/dri/card0 exists (Wayland compat)"
-depend() { need localmount; before display-manager; }
-start() {
-    ebegin "DRM fix (card0 symlink)"
-    mkdir -p /dev/dri
-
-    # card0 が無く、card1 がある場合 → card0 を card1 への symlink に
-    if [ ! -e /dev/dri/card0 ]; then
-        for c in /dev/dri/card1 /dev/dri/card2; do
-            if [ -e "$c" ]; then
-                ln -sf "$c" /dev/dri/card0 2>/dev/null || true
-                break
-            fi
-        done
-    fi
-
-    # renderD128 が無く renderD129 がある場合も同様
-    if [ ! -e /dev/dri/renderD128 ]; then
-        for r in /dev/dri/renderD129 /dev/dri/renderD130; do
-            if [ -e "$r" ]; then
-                ln -sf "$r" /dev/dri/renderD128 2>/dev/null || true
-                break
-            fi
-        done
-    fi
-
-    eend 0
-}
-SVC
-    chmod +x "$TARGET/etc/init.d/ame-drm-fix"
-    for lvl in boot default; do
-        mkdir -p "$TARGET/etc/runlevels/$lvl"
-        ln -sf /etc/init.d/ame-drm-fix "$TARGET/etc/runlevels/$lvl/ame-drm-fix" 2>/dev/null || true
-    done
-    state_mark "drm-fix"
-    log_ok "drm-fix service installed"
-}
-
 install_sway_complete() {
     state_done "de-sway" && chroot "$TARGET" /bin/sh -c 'command -v sway >/dev/null 2>&1' && return 0
     log_info "=== Sway install ==="
@@ -130,66 +24,83 @@ install_sway_complete() {
     pkgs_optional "sway" sway swaybg swayidle swaylock waybar foot fuzzel mako xdg-desktop-portal-wlr xdg-utils
     chroot "$TARGET" /bin/sh -c 'command -v sway >/dev/null 2>&1' || { log_err "sway not found"; return 1; }
 
-    # Sway 起動ラッパー（card0/card1 両対応 + 全 fallback）
+    # Sway / wlroots バージョン取得
+    SWAY_VER=$(chroot "$TARGET" /bin/sh -c 'sway --version 2>&1 | head -1' 2>/dev/null)
+    WLR_VER=$(chroot "$TARGET" /bin/sh -c 'apk info -v 2>/dev/null | grep "^wlroots" | head -1' 2>/dev/null)
+    log_info "  $SWAY_VER"
+    log_info "  $WLR_VER"
+
+    # バージョン互換: Sway 1.12+ / wlroots 0.20+ は pixman + no-modifiers + no-atomic 必須
+    WLR_VER_NUM=$(echo "$WLR_VER" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    case "$WLR_VER_NUM" in
+        0.20*|0.21*|0.22*|0.23*|0.24*|0.25*|0.26*)
+            log_info "  wlroots $WLR_VER_NUM - applying 0.20+ compat flags"
+            mkdir -p "$TARGET/etc/environment.d"
+            cat > "$TARGET/etc/environment.d/10-wlroots-compat.conf" << 'WLR'
+WLR_RENDERER=pixman
+WLR_RENDERER_ALLOW_SOFTWARE=1
+WLR_DRM_NO_MODIFIERS=1
+WLR_DRM_NO_ATOMIC=1
+WLR_NO_HARDWARE_CURSORS=1
+WLR_LIBINPUT_NO_DEVICES=1
+WLR_RENDERER_ALLOW_READBACK=1
+WLR_NO_EXTRA_ENV=1
+MOZ_ENABLE_WAYLAND=1
+QT_QPA_PLATFORM=wayland
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=sway
+WLR
+            ;;
+    esac
+
+    # sway 起動スクリプト（フォールバック付き）
     cat > "$TARGET/usr/local/bin/ame-start-sway" << 'SWAYWRAP'
 #!/bin/sh
-# ame-deploy v9.0: Sway 起動ラッパー（DRM 完全対応）
+# ame-deploy: Sway 起動ラッパー（バージョン互換 + フォールバック）
 UID_NUM="$(id -u)"
 export XDG_RUNTIME_DIR="/run/user/$UID_NUM"
 [ -d "$XDG_RUNTIME_DIR" ] || { mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"; }
 
-# card0 が無ければ作る（DRM fix service が失敗した場合の保険）
-if ! ls /dev/dri/card0 >/dev/null 2>&1; then
-    for c in /dev/dri/card1 /dev/dri/card2; do
-        [ -e "$c" ] && { ln -sf "$c" /dev/dri/card0 2>/dev/null; break; }
-    done
-fi
-
+# DRM チェック
 if ! ls /dev/dri/card* >/dev/null 2>&1; then
     echo "ame-start-sway: /dev/dri/card* not found - GPU driver missing"
     exit 1
 fi
 
-# 使用可能な DRM デバイス一覧
-DRM_DEVS=$(ls /dev/dri/card* 2>/dev/null | tr '\n' ':')
-
-# 試行設定リスト: renderer:mod:atomic:sw:cursor:drm_device
+# 試行順序: 各レンダラ x DRM設定
 for cfg in \
-    "pixman:1:1:1:1:$DRM_DEVS" \
-    "pixman:1:0:1:1:$DRM_DEVS" \
-    "pixman:0:1:1:1:$DRM_DEVS" \
-    "pixman:1:1:1:1:/dev/dri/card1" \
-    "pixman:1:1:1:1:/dev/dri/card0" \
-    "gles2:1:1:1:1:$DRM_DEVS" \
-    "gles2:0:1:1:1:$DRM_DEVS" \
-    "vulkan:1:1:1:1:$DRM_DEVS" ; do
-    IFS=: read R NOM NOA SW CUR DRMS <<EOF
+    "pixman:1:1:1:0" \
+    "pixman:1:1:0:0" \
+    "gles2:1:1:1:0" \
+    "gles2:0:1:1:0" \
+    "vulkan:1:1:1:0" ; do
+    IFS=: read RENDERER NO_MODIFIERS NO_ATOMIC ALLOW_SW NO_CURSORS <<EOF
 $cfg
 EOF
-    export WLR_RENDERER="$R"
-    [ "$NOM" = "1" ] && export WLR_DRM_NO_MODIFIERS=1 || unset WLR_DRM_NO_MODIFIERS
-    [ "$NOA" = "1" ] && export WLR_DRM_NO_ATOMIC=1 || unset WLR_DRM_NO_ATOMIC
-    [ "$SW"  = "1" ] && export WLR_RENDERER_ALLOW_SOFTWARE=1 || unset WLR_RENDERER_ALLOW_SOFTWARE
-    [ "$CUR" = "1" ] && export WLR_NO_HARDWARE_CURSORS=1 || unset WLR_NO_HARDWARE_CURSORS
-    export WLR_DRM_DEVICES="$DRMS"
+    export WLR_RENDERER="$RENDERER"
+    [ "$NO_MODIFIERS" = "1" ] && export WLR_DRM_NO_MODIFIERS=1 || unset WLR_DRM_NO_MODIFIERS
+    [ "$NO_ATOMIC"    = "1" ] && export WLR_DRM_NO_ATOMIC=1    || unset WLR_DRM_NO_ATOMIC
+    [ "$ALLOW_SW"     = "1" ] && export WLR_RENDERER_ALLOW_SOFTWARE=1 || unset WLR_RENDERER_ALLOW_SOFTWARE
+    [ "$NO_CURSORS"   = "1" ] && export WLR_NO_HARDWARE_CURSORS=1    || unset WLR_NO_HARDWARE_CURSORS
 
-    echo "ame-start-sway: trying renderer=$R mod=$NOM atomic=$NOA drm=$DRMS"
-
+    echo "ame-start-sway: trying renderer=$RENDERER mod=$NO_MODIFIERS atomic=$NO_ATOMIC sw=$ALLOW_SW"
+    # 5秒 watchdog で試行
     (sleep 5; pkill -9 -f '^sway$' 2>/dev/null) &
     WD=$!
     sway 2>/tmp/sway-try.log
     RET=$?
     kill $WD 2>/dev/null
-
+    # 5秒以内に kill された (137) なら失敗と判定して次へ
     if [ $RET -eq 137 ]; then
-        echo "ame-start-sway: renderer=$R timeout, trying next..."
+        echo "ame-start-sway: $RENDERER failed (timeout), retrying..."
         continue
     fi
+    # 正常終了なら抜ける
     [ $RET -eq 0 ] && exit 0
 done
 
 echo "ame-start-sway: all configs failed. Last log:"
-tail -40 /tmp/sway-try.log
+tail -30 /tmp/sway-try.log
 echo
 echo "Dropping to shell."
 exit 1
@@ -198,7 +109,7 @@ SWAYWRAP
 
     setup_autostart "ame-start-sway"
     state_mark "de-sway"
-    log_ok "Sway complete (DRM wrapper)"
+    log_ok "Sway complete (with version-compat wrapper)"
 }
 
 install_hyprland_complete() {
@@ -336,6 +247,7 @@ install_de_profile() {
     esac
 }
 
+# 汎用 autostart（DRM チェック + pixman + watchdog + フォールバック）
 setup_autostart() {
     target_cmd="$1"
     cat > "$TARGET/etc/profile.d/ame-autostart.sh" << AUTO
@@ -347,18 +259,28 @@ if [ -z "\$WAYLAND_DISPLAY" ] && [ -z "\$DISPLAY" ] && [ "\$(tty 2>/dev/null)" =
     chmod 0700 "\$RDIR" 2>/dev/null
     export XDG_RUNTIME_DIR="\$RDIR"
 
+    # wlroots 0.20+ 互換デフォルト
     export WLR_RENDERER=pixman
     export WLR_RENDERER_ALLOW_SOFTWARE=1
     export WLR_DRM_NO_MODIFIERS=1
     export WLR_NO_HARDWARE_CURSORS=1
     export LIBGL_ALWAYS_SOFTWARE=1
 
+    # DRM チェック
     if ! ls /dev/dri/card* >/dev/null 2>&1; then
-        echo "ame-autostart: no /dev/dri/card*, dropping to shell"
+        echo
+        echo "=========================================="
+        echo " ame-autostart: /dev/dri/card* not found"
+        echo " GPU driver failed. Dropping to shell."
+        echo " Diagnose: dmesg | grep i915"
+        echo "=========================================="
+        echo "Press Enter for shell."
+        read _ < /dev/tty1
         exec /bin/sh
     fi
 
-    (sleep 25; pkill -9 -f "$target_cmd" 2>/dev/null) &
+    # 起動試行（20s watchdog）
+    (sleep 20; pkill -9 -f "$target_cmd" 2>/dev/null) &
     WD=\$!
     $target_cmd 2>/tmp/wayland-\$(id -u).log
     RET=\$?

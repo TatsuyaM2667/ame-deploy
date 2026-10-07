@@ -47,6 +47,12 @@ install_kernel_firmware() {
         chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $pkg >/dev/null 2>&1" && \
             log_ok "  $pkg" || log_warn "  skip: $pkg"
     done
+    # .zst 展開（ネットワーク接続なしでも読めるように）
+    if command -v zstd >/dev/null 2>&1; then
+        find "$TARGET/lib/firmware" -name '*.zst' -type f 2>/dev/null | while read -r f; do
+            [ -f "${f%.zst}" ] || zstd -d -q "$f" -o "${f%.zst}" 2>/dev/null || true
+        done
+    fi
     _umount_chroot_fs
 }
 
@@ -102,7 +108,7 @@ select_and_install_kernel() {
     fi
     echo "  Kernel:"
     echo "    [1] linux-lts    (recommended)"
-    echo "    [2] linux-stable (edge)"
+    echo "    [2] linux-stable (edge, newest)"
     echo "    [3] linux-virt   (VM)"
     printf "  Select [1]: "; read kc
     [ -z "$kc" ] && kc="1"
@@ -117,10 +123,11 @@ select_and_install_kernel() {
     install_kernel_firmware
 
     KVER=$(ls "$TARGET/lib/modules" 2>/dev/null | head -1)
-    [ -n "$KVER" ] || { log_err "no kernel"; return 1; }
+    [ -n "$KVER" ] || { log_err "no kernel modules"; return 1; }
     log_ok "kernel: $KVER"
 
     generate_initramfs || return 1
+
     state_mark "kernel"
     log_ok "kernel ready ($KVER)"
 }

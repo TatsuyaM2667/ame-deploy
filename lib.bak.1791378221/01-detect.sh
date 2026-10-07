@@ -37,6 +37,7 @@ detect_wifi() {
     echo unknown
 }
 detect_wifi_pci() {
+    # PCI ID (vendor:device) を返す - モジュール特定に使う
     lspci -nn 2>/dev/null | grep -iE 'network|wireless' | grep -oE '[0-9a-f]{4}:[0-9a-f]{4}' | head -1
 }
 detect_eth() {

@@ -1,5 +1,5 @@
 #!/bin/sh
-DEPLOY_VER="9.0.0"
+DEPLOY_VER="8.0.0"
 : "${TARGET:=}"; : "${ESP:=}"; : "${DEV:=}"; : "${P1:=}"; : "${P2:=}"; : "${STATE_DIR:=}"
 
 log_info() { printf "[INFO] %s\n" "$*"; }
@@ -10,8 +10,8 @@ die()      { log_err "$*"; exit 1; }
 pause()    { printf "\n  Enter > "; read -r _; }
 require_root() { [ "$(id -u)" = "0" ] || die "must be root"; }
 require_disk() {
-    [ -n "$DEV" ] || die "no disk"
-    [ -b "$DEV" ] || die "$DEV not block"
+    [ -n "$DEV" ] || die "no disk selected"
+    [ -b "$DEV" ] || die "$DEV not a block device"
     mountpoint -q "$TARGET" 2>/dev/null || die "$TARGET not mounted"
     mountpoint -q "$ESP" 2>/dev/null || die "$ESP not mounted"
 }
@@ -21,7 +21,10 @@ state_init() { [ -n "$TARGET" ] || return 1; STATE_DIR="$TARGET/var/lib/ame-depl
 state_mark() { [ -n "$STATE_DIR" ] || state_init; touch "$STATE_DIR/$1" 2>/dev/null; }
 state_done() { [ -n "$STATE_DIR" ] || state_init; [ -f "$STATE_DIR/$1" ]; }
 state_clear(){ [ -n "$STATE_DIR" ] || return 0; rm -rf "$STATE_DIR" 2>/dev/null; }
-state_list() { [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ] && for f in "$STATE_DIR"/*; do [ -f "$f" ] && printf "  * %s\n" "$(basename "$f")"; done; return 0; }
+state_list() {
+    [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ] || return 0
+    for f in "$STATE_DIR"/*; do [ -f "$f" ] && printf "  * %s\n" "$(basename "$f")"; done
+}
 
 _mount_chroot_fs() {
     [ -n "$TARGET" ] || return 0
@@ -39,14 +42,36 @@ _umount_chroot_fs() {
     umount "$TARGET/proc" 2>/dev/null || true
 }
 
+# initramfs 検証: /init 存在 + i915 firmware 含む
 _verify_initramfs() {
     f="$1"; [ -f "$f" ] || return 1
     sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
     [ "$sz" -gt 500000 ] || return 1
     tmp="/tmp/irv-$$"; rm -rf "$tmp"; mkdir -p "$tmp"
     ( cd "$tmp" && zcat "$f" 2>/dev/null | cpio -idm --quiet 2>/dev/null )
-    rc=1; [ -e "$tmp/init" ] && rc=0
+    rc=1
+    [ -e "$tmp/init" ] && rc=0
     rm -rf "$tmp"; return $rc
+}
+
+# firmware 検証: .bin / .bin.zst / .ucode 両対応
+_verify_firmware_complete() {
+    ok=1
+    # i915 (GuC/HuC) - .bin or .bin.zst or .ucode
+    if ! ls "$TARGET/lib/firmware/i915/"* 2>/dev/null | grep -qiE 'guc|huc'; then
+        log_warn "    i915 GuC/HuC firmware MISSING"
+        ok=0
+    fi
+    # WiFi rtw88/rtw89
+    if ! ls "$TARGET/lib/firmware/rtw88/"* 2>/dev/null | grep -q .; then
+        log_warn "    rtw88 firmware MISSING"
+        ok=0
+    fi
+    if ! ls "$TARGET/lib/firmware/rtw89/"* 2>/dev/null | grep -q .; then
+        log_warn "    rtw89 firmware MISSING"
+        ok=0
+    fi
+    [ "$ok" = "1" ]
 }
 
 auto_mount_target() {
