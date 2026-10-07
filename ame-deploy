@@ -1,11 +1,7 @@
 #!/bin/sh
 SELF="$(readlink -f "$0")"
 DEPLOY_DIR="$(dirname "$SELF")"
-
-for _f in "$DEPLOY_DIR"/lib/*.sh; do
-    [ -f "$_f" ] && . "$_f"
-done
-
+for _f in "$DEPLOY_DIR"/lib/*.sh; do [ -f "$_f" ] && . "$_f"; done
 command -v log_info >/dev/null 2>&1 || log_info() { echo "[INFO] $*"; }
 command -v log_ok   >/dev/null 2>&1 || log_ok()   { echo "[ OK ] $*"; }
 command -v log_warn >/dev/null 2>&1 || log_warn() { echo "[WARN] $*" >&2; }
@@ -35,21 +31,21 @@ banner() {
     clear
     cat << 'BEOF'
 +------------------------------------------------------+
-|   Ame Linux Installer (ame-deploy) v0.8              |
-|   River default / 4-DE reliable / idempotent         |
+|   Ame Linux Installer (ame-deploy) v1.0              |
+|   FULL-AUTO / River default / 4-DE reliable          |
 +------------------------------------------------------+
 |   [1] Detect hardware                                |
 |   [2] Select disk + partition                        |
 |   [3] Copy rootfs                                    |
-|   [4] Install kernel (linux-lts / edge)              |
+|   [4] Install kernel                                 |
 |   [5] Install firmware / drivers                     |
 |   [6] Select desktop environment                     |
 |   [7] Create user                                    |
 |   [8] Install bootloader                             |
 |   [9] Verify install                                 |
 |                                                      |
+|   [A] ★ FULL AUTO (default: River, minimal prompts)  |
 |   [R] Rescue                                         |
-|   [A] Full auto (1-9)                                |
 |   [C] Show progress                                  |
 |   [S] Shell    [X] Reboot  [P] Poweroff  [Q] Quit    |
 +------------------------------------------------------+
@@ -81,7 +77,6 @@ step3() {
     state_done "rootfs" && { log_info "rootfs copied - skip"; pause; return; }
     copy_rootfs; setup_target_skeleton; write_fstab
     state_mark "rootfs"
-    log_ok "rootfs copied"
     pause
 }
 step4() { require_disk || { pause; return; }; state_init; select_and_install_kernel; pause; }
@@ -89,12 +84,10 @@ step5() { require_disk || { pause; return; }; state_init; install_hw_firmware "$
 step6() {
     require_disk || { pause; return; }
     state_init
-
     if ! state_done "kernel" || [ ! -d "$TARGET/lib/modules" ] || [ -z "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ]; then
-        log_warn "kernel not installed - installing linux-lts first"
+        log_warn "kernel missing - installing linux-lts"
         select_and_install_kernel || { log_err "kernel failed"; pause; return; }
     fi
-
     echo
     echo "  Profile:"
     echo "    [1] River          (default, wayland tiling)"
@@ -102,10 +95,9 @@ step6() {
     echo "    [3] GNOME"
     echo "    [4] Hyprland       (edge, best-effort)"
     echo "    [5] Sway"
-    echo "    [0] minimal (CUI only)"
+    echo "    [0] minimal"
     printf "  Select [1]: "; read d
     [ -z "$d" ] && d="1"
-
     case "$d" in
         0) profile="00-minimal" ;;
         1) profile="01-river" ;;
@@ -115,8 +107,7 @@ step6() {
         5) profile="05-sway" ;;
         *) log_err "invalid"; pause; return ;;
     esac
-
-    install_de_profile "$profile" "auto"
+    install_de_profile "$profile"
     pause
 }
 step7() { require_disk || { pause; return; }; state_init; create_user; pause; }
@@ -126,43 +117,87 @@ step8() {
     install_bootloader_complete "$DEPLOY_DIR/boot" || { log_err "bootloader failed"; pause; return; }
     cleanup_deploy
     sync
-    log_ok "bootloader installed"
     pause
 }
 step9() { require_disk || { pause; return; }; state_init; verify_target; pause; }
 step_rescue() { rescue_installed_system; pause; }
 
-step_all() {
-    printf "  Full auto (River default)? [y/N] > "; read c
-    [ "$c" = "y" ] || return
+# ---- FULL AUTO ----
+step_full_auto() {
+    AUTOMODE=1
+
+    echo
+    echo "======================================================"
+    echo "   FULL AUTO INSTALL"
+    echo "   - kernel : linux-lts"
+    echo "   - DE     : River (default)"
+    echo "   - user   : ame / ame / ame"
+    echo "======================================================"
+    echo
+    echo "  !! This will WIPE the selected disk !!"
+    echo
+    printf "  Continue? type 'yes' > "; read c
+    [ "$c" = "yes" ] || return
 
     show_hw_summary
-    state_init
 
-    if ! state_done "rootfs"; then
-        select_disk || return
-        umount_disk
-        partition_disk    || return
-        format_partitions || return
-        mount_target      || return
-        state_clear; state_init
-        copy_rootfs
-        setup_target_skeleton
-        write_fstab
-        state_mark "rootfs"
-    fi
+    # --- [2] disk ---
+    select_disk || return
+    umount_disk
+    partition_disk    || { log_err "partition failed"; return; }
+    format_partitions || { log_err "format failed"; return; }
+    mount_target      || { log_err "mount failed"; return; }
+    state_init; state_clear; state_init
+    state_mark "rootfs-begin"
 
-    state_done "kernel"    || { log_info "installing linux-lts"; echo "1" | select_and_install_kernel; }
-    state_done "firmware"  || install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
-    state_done "de-river"  || install_de_profile "01-river" auto
-    state_done "user"      || create_user
-    state_done "bootloader"|| install_bootloader_complete "$DEPLOY_DIR/boot"
+    # --- [3] rootfs ---
+    log_info "[3/9] rootfs copy"
+    copy_rootfs
+    setup_target_skeleton
+    write_fstab
+    state_mark "rootfs"
 
+    # --- [4] kernel ---
+    log_info "[4/9] kernel (linux-lts)"
+    select_and_install_kernel || return
+    state_mark "kernel"
+
+    # --- [5] firmware ---
+    log_info "[5/9] firmware"
+    install_hw_firmware "$(detect_gpu)" "$(detect_wifi)"
+    state_mark "firmware"
+
+    # --- [6] DE (River default) ---
+    log_info "[6/9] Desktop (River)"
+    install_de_profile "01-river"
+    state_mark "de"
+
+    # --- [7] user ---
+    log_info "[7/9] user"
+    create_user
+    state_mark "user"
+
+    # --- [8] bootloader ---
+    log_info "[8/9] bootloader"
+    install_bootloader_complete "$DEPLOY_DIR/boot" || return
+    state_mark "bootloader"
     cleanup_deploy
+
+    # --- [9] verify ---
+    log_info "[9/9] verify"
     sync
     verify_target
+
     umount "$ESP"    2>/dev/null || true
     umount "$TARGET" 2>/dev/null || true
+
+    echo
+    log_ok "=========================================="
+    log_ok " FULL AUTO INSTALL COMPLETE"
+    log_ok "=========================================="
+    echo "  user: ame / password: ame"
+    echo "  root: ame"
+    echo
     printf "  Reboot now? [y/N] > "; read r
     [ "$r" = "y" ] && reboot
 }
@@ -191,8 +226,8 @@ while true; do
         7) step7 ;;
         8) step8 ;;
         9) step9 ;;
+        A|a) step_full_auto ;;
         R|r) step_rescue ;;
-        A|a) step_all ;;
         C|c) show_progress ;;
         S|s) /bin/sh ;;
         X|x) reboot ;;

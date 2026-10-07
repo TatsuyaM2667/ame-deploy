@@ -5,9 +5,14 @@ create_user() {
         return 0
     fi
     log_info "user creation"
-    printf "  username [ame]: "; read uname
-    [ -z "$uname" ] && uname="ame"
-    printf "  password: "; stty -echo; read upass; stty echo; echo
+    if [ "$AUTOMODE" = "1" ]; then
+        uname="ame"; upass="ame"; rpass="ame"
+        log_info "  [auto] user=ame pass=ame"
+    else
+        printf "  username [ame]: "; read uname
+        [ -z "$uname" ] && uname="ame"
+        printf "  password: "; stty -echo; read upass; stty echo; echo
+    fi
 
     chroot "$TARGET" /bin/sh -c "
         export PATH=/sbin:/usr/sbin:/bin:/usr/bin
@@ -16,7 +21,7 @@ create_user() {
         for g in wheel video audio input seat netdev plugdev; do
             addgroup $uname \$g 2>/dev/null || true
         done
-    " || { log_err "failed"; return 1; }
+    " || { log_err "user creation failed"; return 1; }
 
     mkdir -p "$TARGET/etc/sudoers.d"
     cat > "$TARGET/etc/sudoers.d/wheel" << 'SEOF'
@@ -24,7 +29,9 @@ create_user() {
 SEOF
     chmod 0440 "$TARGET/etc/sudoers.d/wheel"
 
-    printf "  root password: "; stty -echo; read rpass; stty echo; echo
+    if [ "$AUTOMODE" != "1" ]; then
+        printf "  root password: "; stty -echo; read rpass; stty echo; echo
+    fi
     chroot "$TARGET" /bin/sh -c "echo 'root:$rpass' | chpasswd" || true
 
     uid=$(chroot "$TARGET" /bin/sh -c "id -u $uname 2>/dev/null" || echo 1000)

@@ -1,11 +1,11 @@
 #!/bin/sh
 copy_rootfs() {
-    log_info "copying rootfs..."
+    log_info "copying rootfs (cp -a)..."
     mkdir -p "$TARGET"
     for d in bin etc home lib lib64 media opt root sbin srv usr var; do
         [ -e "/$d" ] && { log_info "  /$d"; cp -a "/$d" "$TARGET/" 2>/dev/null || true; }
     done
-    mkdir -p "$TARGET"/{proc,sys,dev,run,tmp,mnt,media}
+    mkdir -p "$TARGET/proc" "$TARGET/sys" "$TARGET/dev" "$TARGET/run" "$TARGET/tmp" "$TARGET/mnt" "$TARGET/media"
     chmod 1777 "$TARGET/tmp" 2>/dev/null || true
     chmod 0700 "$TARGET/root" 2>/dev/null || true
     log_ok "rootfs copied"
@@ -31,7 +31,7 @@ IEOF
 KillUserProcesses=no
 RemoveIPC=no
 LEOF
-    mkdir -p "$TARGET/etc/runlevels"/{boot,sysinit,default,shutdown}
+    mkdir -p "$TARGET/etc/runlevels/boot" "$TARGET/etc/runlevels/sysinit" "$TARGET/etc/runlevels/default" "$TARGET/etc/runlevels/shutdown"
     for s in bootmisc hostname hwclock modules swap sysctl syslog; do
         [ -e "$TARGET/etc/init.d/$s" ] && ln -sf "/etc/init.d/$s" "$TARGET/etc/runlevels/boot/$s" 2>/dev/null || true
     done
@@ -41,6 +41,11 @@ LEOF
     for s in networking local default; do
         [ -e "$TARGET/etc/init.d/$s" ] && ln -sf "/etc/init.d/$s" "$TARGET/etc/runlevels/default/$s" 2>/dev/null || true
     done
+    # シリアルコンソール
+    if [ -f "$TARGET/etc/inittab" ]; then
+        grep -q ttyS0 "$TARGET/etc/inittab" || \
+            echo "ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100" >> "$TARGET/etc/inittab"
+    fi
     log_ok "skeleton done"
 }
 write_fstab() {

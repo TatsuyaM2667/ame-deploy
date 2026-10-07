@@ -5,7 +5,7 @@ rescue_installed_system() {
     for d in /mnt/ame-target /mnt/ame /mnt; do
         if [ -f "$d/etc/os-release" ] || [ -f "$d/sbin/init" ]; then ROOT="$d"; break; fi
     done
-    [ -n "$ROOT" ] && [ -d "$ROOT/etc" ] || { log_err "no install found"; return 1; }
+    [ -n "$ROOT" ] && [ -d "$ROOT/etc" ] || { log_err "no install found. mount /dev/sda2 /mnt/ame"; return 1; }
 
     log_info "rescuing: $ROOT"
     mv "$ROOT/etc/profile.d/ame-autostart.sh" "$ROOT/etc/profile.d/ame-autostart.sh.disabled" 2>/dev/null || true
@@ -50,15 +50,20 @@ SVC
         done
     done
 
-    # Hyprland libstdc++ 修復
+    # Hyprland ABI 修復（del なし）
     if [ -e "$ROOT/usr/bin/Hyprland" ]; then
-        log_info "fixing libstdc++ ABI..."
+        log_info "Hyprland ABI fix"
+        mount -t proc     none "$ROOT/proc" 2>/dev/null || true
+        mount -t sysfs    none "$ROOT/sys"  2>/dev/null || true
+        mount -t devtmpfs none "$ROOT/dev"  2>/dev/null || true
         chroot "$ROOT" /bin/sh -c '
             export PATH=/sbin:/usr/sbin:/bin:/usr/bin
-            apk upgrade --available --force-missing-repositories >/dev/null 2>&1 || true
-            apk add --force-overwrite --force-missing-repositories libstdc++ libgcc gcc >/dev/null 2>&1 || true
-            apk fix hyprland hyprutils hyprlang hyprcursor >/dev/null 2>&1 || true
+            apk add --force-overwrite --force-missing-repositories libstdc++ libgcc gcc g++ >/dev/null 2>&1
+            apk add --force-overwrite --force-missing-repositories hyprland hyprutils hyprlang hyprcursor >/dev/null 2>&1
         ' || true
+        umount "$ROOT/dev" 2>/dev/null || true
+        umount "$ROOT/sys" 2>/dev/null || true
+        umount "$ROOT/proc" 2>/dev/null || true
     fi
 
     # autostart 再作成
@@ -67,17 +72,14 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/
     UID_NUM="$(id -u)"
     RDIR="/run/user/$UID_NUM"
     i=0
-    while [ $i -lt 10 ]; do
-        [ -d "$RDIR" ] && break
-        sleep 1
-        i=$((i+1))
-    done
+    while [ $i -lt 10 ]; do [ -d "$RDIR" ] && break; sleep 1; i=$((i+1)); done
     [ -d "$RDIR" ] || mkdir -p "$RDIR" 2>/dev/null
     if [ -d "$RDIR" ]; then
         export XDG_RUNTIME_DIR="$RDIR"
         chmod 0700 "$RDIR" 2>/dev/null
-        command -v start-hyprland >/dev/null 2>&1 && start-hyprland || \
-        command -v Hyprland >/dev/null 2>&1 && Hyprland || echo "shell"
+        for c in Hyprland sway river; do
+            if command -v $c >/dev/null 2>&1; then $c; break; fi
+        done
     fi
 fi
 AEOF

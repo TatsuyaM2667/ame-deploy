@@ -1,9 +1,6 @@
 #!/bin/sh
 install_runtime_dir_service() {
-    if state_done "runtime-dir"; then
-        log_info "runtime-dir service already installed"
-        return 0
-    fi
+    state_done "runtime-dir" && { log_info "runtime-dir service exists"; return 0; }
     mkdir -p "$TARGET/etc/init.d"
     cat > "$TARGET/etc/init.d/ame-runtime-dir" << 'SVC'
 #!/sbin/openrc-run

@@ -1,11 +1,10 @@
 #!/bin/sh
 select_and_install_kernel() {
-    # 冪等チェック
     if state_done "kernel" && [ -d "$TARGET/lib/modules" ] && \
-       [ -n "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ]; then
+       [ -n "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ] && \
+       ls "$TARGET/boot/initramfs-"* >/dev/null 2>&1; then
         KVER=$(ls "$TARGET/lib/modules" | head -1)
         log_info "kernel already installed: $KVER"
-        # /tmp に保存（bootloader が使う）
         for k in vmlinuz-lts vmlinuz-edge vmlinuz-virt; do
             [ -f "$TARGET/boot/$k" ] && echo "$k" > /tmp/ame-kimg && break
         done
@@ -21,8 +20,12 @@ select_and_install_kernel() {
     echo "    [3] linux-virt      VM only"
     echo "    [4] both LTS+edge"
     echo "    [5] skip"
-    printf "  Select [1]: "; read kc
-    [ -z "$kc" ] && kc="1"
+    if [ "$AUTOMODE" = "1" ]; then
+        kc="1"; log_info "  [auto] using linux-lts"
+    else
+        printf "  Select [1]: "; read kc
+        [ -z "$kc" ] && kc="1"
+    fi
 
     case "$kc" in
         1) KPKGS="linux-lts";  KIMG="vmlinuz-lts";  KINITRD="initramfs-lts" ;;
@@ -42,15 +45,17 @@ select_and_install_kernel() {
 https://dl-cdn.alpinelinux.org/alpine/edge/main
 https://dl-cdn.alpinelinux.org/alpine/edge/community
 REPOEOF
-    chroot "$TARGET" /bin/sh -c 'export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk update --force-missing-repositories 2>&1 | tail -2'
+    _chroot_apk "apk update --force-missing-repositories 2>&1 | tail -2"
 
     log_info "[2/4] install $KPKGS + mkinitfs"
-    chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $KPKGS mkinitfs 2>&1 | tail -5"
+    _mount_chroot_fs
+    _chroot_apk "apk add --no-cache --force-missing-repositories $KPKGS mkinitfs 2>&1 | tail -5"
+    _umount_chroot_fs
 
-    # 個別 firmware（失敗許容）
     log_info "[3/4] firmware (optional)"
     for pkg in linux-firmware-i915 linux-firmware-intel linux-firmware-amdgpu linux-firmware-nvidia linux-firmware-rtw88 linux-firmware-rtw89 linux-firmware-rtl_nic linux-firmware-rtlwifi linux-firmware-mediatek linux-firmware-brcm linux-firmware-ath10k linux-firmware-ath11k linux-firmware-ath12k; do
-        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $pkg >/dev/null 2>&1" && echo "    [OK] $pkg" || true
+        _chroot_apk "apk add --no-cache --force-missing-repositories $pkg >/dev/null 2>&1" && \
+            log_ok "    $pkg" || true
     done
 
     if [ ! -d "$TARGET/lib/modules" ] || [ -z "$(ls -A "$TARGET/lib/modules" 2>/dev/null)" ]; then
@@ -61,8 +66,6 @@ REPOEOF
     log_ok "kernel modules: $KVER"
 
     log_info "[4/4] generating initramfs"
-    # chroot mkinitfs には /proc /sys /dev が必須
-    _mount_chroot_fs
     for v in $(ls "$TARGET/lib/modules"); do
         img="initramfs-${v##*-}"
         case "$v" in
@@ -71,24 +74,20 @@ REPOEOF
             *-virt) img="initramfs-virt" ;;
         esac
         if [ -f "$TARGET/boot/$img" ]; then
-            log_ok "  $img already exists"
+            log_ok "  $img exists"
         else
-            log_info "  generating $img for $v"
-            chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; mkinitfs -o /boot/$img $v 2>&1 | tail -3" || true
+            log_info "  generating $img"
+            _mount_chroot_fs
+            _chroot_apk "mkinitfs -o /boot/$img $v 2>&1 | tail -3"
+            _umount_chroot_fs
             [ -f "$TARGET/boot/$img" ] && log_ok "  $img OK" || log_warn "  $img failed"
         fi
     done
-    _umount_chroot_fs
 
-    # 最終確認
     if ! ls "$TARGET/boot/initramfs-"* >/dev/null 2>&1; then
         log_err "no initramfs generated"
-        echo "  Check: chroot $TARGET apk add mkinitfs"
-        echo "         chroot $TARGET mkinitfs -o /boot/initramfs-lts $KVER"
         return 1
     fi
-
-    ls -la "$TARGET/boot/" 2>/dev/null | grep -E 'vmlinuz|initramfs' || true
 
     for k in vmlinuz-lts vmlinuz-edge vmlinuz-virt; do
         [ -f "$TARGET/boot/$k" ] && echo "$k" > /tmp/ame-kimg && break

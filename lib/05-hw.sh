@@ -4,7 +4,6 @@ install_hw_firmware() {
         log_info "firmware already installed - skip"
         return 0
     fi
-
     gpu="$1"; wifi="$2"
     log_info "GPU=$gpu WiFi=$wifi"
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
@@ -24,7 +23,7 @@ install_hw_firmware() {
     pkgs="$pkgs linux-firmware-rtl_nic"
 
     for p in $pkgs; do
-        chroot "$TARGET" /bin/sh -c "export PATH=/sbin:/usr/sbin:/bin:/usr/bin; apk add --no-cache --force-missing-repositories $p >/dev/null 2>&1" && \
+        _chroot_apk "apk add --no-cache --force-missing-repositories $p >/dev/null 2>&1" && \
             log_ok "  $p" || log_warn "  skip: $p"
     done
 

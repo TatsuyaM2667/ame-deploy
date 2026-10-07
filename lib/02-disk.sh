@@ -59,7 +59,6 @@ partition_disk() {
     log_ok "ESP=$P1 root=$P2"
 }
 format_partitions() {
-    log_info "pre-format unmount..."
     for p in "$P1" "$P2"; do
         umount -f "$p" 2>/dev/null || umount -l "$p" 2>/dev/null || true
     done

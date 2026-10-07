@@ -4,7 +4,7 @@ detect_cpu_cores() { nproc 2>/dev/null || echo 1; }
 detect_ram_mb()    { awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo; }
 detect_gpu() {
     if command -v lspci >/dev/null 2>&1; then
-        local l; l=$(lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | head -1)
+        l=$(lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | head -1)
         case "$l" in
             *1002:*|*AMD*|*Radeon*) echo amd; return ;;
             *8086:*|*Intel*)        echo intel; return ;;
@@ -22,14 +22,14 @@ detect_gpu() {
     echo unknown
 }
 detect_wifi() {
-    local has=0
+    has=0
     for w in /sys/class/net/*/wireless; do [ -e "$w" ] && has=1 && break; done
     [ "$has" = "1" ] || { echo none; return; }
     if command -v lspci >/dev/null 2>&1; then
-        local l; l=$(lspci -nn 2>/dev/null | grep -iE 'network|wireless' | head -1)
+        l=$(lspci -nn 2>/dev/null | grep -iE 'network|wireless' | head -1)
         case "$l" in
-            *10ec:*) echo realtek;  return ;;
-            *8086:*) echo intel;    return ;;
+            *10ec:*) echo realtek; return ;;
+            *8086:*) echo intel; return ;;
             *14c3:*) echo mediatek; return ;;
             *14e4:*) echo broadcom; return ;;
         esac
@@ -39,7 +39,7 @@ detect_wifi() {
 detect_eth() {
     for d in /sys/class/net/e*; do
         [ -e "$d" ] || continue
-        local i; i=$(basename "$d")
+        i=$(basename "$d")
         [ -e "/sys/class/net/$i/wireless" ] && continue
         [ "$i" = "lo" ] && continue
         echo yes; return
